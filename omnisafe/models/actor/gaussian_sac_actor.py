@@ -51,6 +51,8 @@ class GaussianSACActor(Actor):
         hidden_sizes: list[int],
         activation: Activation = 'relu',
         weight_initialization_mode: InitFunction = 'kaiming_uniform',
+        use_risk: bool = False,
+        risk_size: int = 2,
     ) -> None:
         """Initialize an instance of :class:`GaussianSACActor`."""
         super().__init__(obs_space, act_space, hidden_sizes, activation, weight_initialization_mode)
@@ -59,12 +61,14 @@ class GaussianSACActor(Actor):
             sizes=[self._obs_dim, *self._hidden_sizes, self._act_dim * 2],
             activation=activation,
             weight_initialization_mode=weight_initialization_mode,
+            use_risk = use_risk,
+            risk_size = risk_size,
         )
 
         self._current_raw_action: torch.Tensor | None = None
         self.register_buffer('_log2', torch.log(torch.tensor(2.0)))
 
-    def _distribution(self, obs: torch.Tensor) -> Normal:
+    def _distribution(self, obs: torch.Tensor, risk: torch.Tensor = None) -> Normal:
         """Get the distribution of the actor.
 
         .. warning::
@@ -79,12 +83,12 @@ class GaussianSACActor(Actor):
         Returns:
             The normal distribution of the mean and standard deviation from the actor.
         """
-        mean, log_std = self.net(obs).chunk(2, dim=-1)
+        mean, log_std = self.net(obs, risk).chunk(2, dim=-1) if self._use_risk else self.net(obs).chunk(2, dim=-1)
         log_std = torch.clamp(log_std, min=-20, max=2)
         std = log_std.exp()
         return Normal(mean, std)
 
-    def predict(self, obs: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
+    def predict(self, obs: torch.Tensor, risk: torch.Tensor = None, deterministic: bool = False) -> torch.Tensor:
         """Predict the action given observation.
 
         The predicted action depends on the ``deterministic`` flag.
@@ -99,7 +103,7 @@ class GaussianSACActor(Actor):
         Returns:
             The mean of the distribution if deterministic is True, otherwise the sampled action.
         """
-        self._current_dist = self._distribution(obs)
+        self._current_dist = self._distribution(obs, risk)
         self._after_inference = True
 
         action = self._current_dist.mean if deterministic else self._current_dist.rsample()
@@ -108,7 +112,7 @@ class GaussianSACActor(Actor):
 
         return torch.tanh(action)
 
-    def forward(self, obs: torch.Tensor) -> TanhNormal:
+    def forward(self, obs: torch.Tensor, risk: torch.Tensor = None) -> TanhNormal:
         """Forward method.
 
         Args:
@@ -117,7 +121,7 @@ class GaussianSACActor(Actor):
         Returns:
             The current distribution.
         """
-        self._current_dist = self._distribution(obs)
+        self._current_dist = self._distribution(obs, risk)
         self._after_inference = True
         return TanhNormal(self._current_dist.mean, self._current_dist.stddev)
 

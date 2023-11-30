@@ -45,6 +45,8 @@ class ActorBuilder:
         hidden_sizes: list[int],
         activation: Activation = 'relu',
         weight_initialization_mode: InitFunction = 'kaiming_uniform',
+        use_risk=False,
+        risk_size=2,
     ) -> None:
         """Initialize an instance of :class:`ActorBuilder`."""
         self._obs_space: OmnisafeSpace = obs_space
@@ -52,6 +54,8 @@ class ActorBuilder:
         self._weight_initialization_mode: InitFunction = weight_initialization_mode
         self._activation: Activation = activation
         self._hidden_sizes: list[int] = hidden_sizes
+        self._use_risk = use_risk
+        self._risk_size = risk_size
 
     # pylint: disable-next=too-many-return-statements
     def build_actor(
@@ -81,6 +85,8 @@ class ActorBuilder:
                 self._hidden_sizes,
                 activation=self._activation,
                 weight_initialization_mode=self._weight_initialization_mode,
+                use_risk=self._use_risk,
+                risk_size=self._risk_size,
             )
         if actor_type == 'gaussian_sac':
             return GaussianSACActor(
@@ -89,6 +95,8 @@ class ActorBuilder:
                 self._hidden_sizes,
                 activation=self._activation,
                 weight_initialization_mode=self._weight_initialization_mode,
+                use_risk=self._use_risk,
+                risk_size=self._risk_size,
             )
         if actor_type == 'mlp':
             return MLPActor(
@@ -97,6 +105,8 @@ class ActorBuilder:
                 self._hidden_sizes,
                 activation=self._activation,
                 weight_initialization_mode=self._weight_initialization_mode,
+                use_risk=self._use_risk,
+                risk_size=self._risk_size,
             )
         if actor_type == 'vae':
             return VAE(
@@ -105,6 +115,8 @@ class ActorBuilder:
                 self._hidden_sizes,
                 activation=self._activation,
                 weight_initialization_mode=self._weight_initialization_mode,
+                use_risk=self._use_risk,
+                risk_size=self._risk_size,
             )
         if actor_type == 'perturbation':
             return PerturbationActor(
@@ -113,6 +125,8 @@ class ActorBuilder:
                 self._hidden_sizes,
                 activation=self._activation,
                 weight_initialization_mode=self._weight_initialization_mode,
+                use_risk=self._use_risk,
+                risk_size=self._risk_size,
             )
         raise NotImplementedError(
             f'Actor type {actor_type} is not implemented! '

@@ -42,11 +42,20 @@ class BaseAlgo(ABC):  # pylint: disable=too-few-public-methods
 
         assert hasattr(cfgs.train_cfgs, 'device'), 'Please specify the device in the config file.'
         self._device: torch.device = get_device(self._cfgs.train_cfgs.device)
+        self.risk_size = self._cfgs.risk_cfgs.quantile_num if self._cfgs.risk_cfgs.risk_type == "quantile" else 2
 
         distributed.setup_distributed()
 
         self._init_env()
+    
+        if cfgs.risk_cfgs.use_risk:
+            self._init_risk_model()
+
+        if cfgs.risk_cfgs.fine_tune_risk:
+            self._init_risk_update()
+        
         self._init_model()
+
 
         self._init()
 
@@ -73,6 +82,15 @@ class BaseAlgo(ABC):  # pylint: disable=too-few-public-methods
     @abstractmethod
     def _init_model(self) -> None:
         """Initialize the model."""
+
+    @abstractmethod
+    def _init_risk_model(self) -> None:
+        """Initialize the risk model."""
+
+    @abstractmethod
+    def _init_risk_update(self) -> None:
+        """Initialize the risk model update."""
+
 
     @abstractmethod
     def _init_log(self) -> None:

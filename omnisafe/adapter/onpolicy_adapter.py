@@ -20,13 +20,14 @@ from typing import Any
 
 import torch
 from rich.progress import track
+import numpy as np
 
 from omnisafe.adapter.online_adapter import OnlineAdapter
 from omnisafe.common.buffer import VectorOnPolicyBuffer
 from omnisafe.common.logger import Logger
 from omnisafe.models.actor_critic.constraint_actor_critic import ConstraintActorCritic
 from omnisafe.utils.config import Config
-
+from src.utils import compute_fear
 
 class OnPolicyAdapter(OnlineAdapter):
     """OnPolicy Adapter for OmniSafe.
@@ -50,6 +51,7 @@ class OnPolicyAdapter(OnlineAdapter):
         num_envs: int,
         seed: int,
         cfgs: Config,
+        risk_model: nn.Module = None,
     ) -> None:
         """Initialize an instance of :class:`OnPolicyAdapter`."""
         super().__init__(env_id, num_envs, seed, cfgs)
@@ -61,6 +63,8 @@ class OnPolicyAdapter(OnlineAdapter):
         agent: ConstraintActorCritic,
         buffer: VectorOnPolicyBuffer,
         logger: Logger,
+        risk_rb=None,
+        risk_model=None,
     ) -> None:
         """Rollout the environment and store the data in the buffer.
 
@@ -76,13 +80,17 @@ class OnPolicyAdapter(OnlineAdapter):
             logger (Logger): Logger, to log ``EpRet``, ``EpCost``, ``EpLen``.
         """
         self._reset_log()
+        f_next_obs, f_costs = None, None
 
         obs, _ = self.reset()
+        obs_size = obs.shape[-1]
         for step in track(
             range(steps_per_epoch),
             description=f'Processing rollout for epoch: {logger.current_epoch}...',
         ):
-            act, value_r, value_c, logp = agent.step(obs)
+            with torch.no_grad():
+                risk = None if not self._cfgs.risk_cfgs.use_risk else risk_model(obs)
+            act, value_r, value_c, logp = agent.step(obs, risk)
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
 
             self._log_value(reward=reward, cost=cost, info=info)
@@ -90,7 +98,10 @@ class OnPolicyAdapter(OnlineAdapter):
             if self._cfgs.algo_cfgs.use_cost:
                 logger.store({'Value/cost': value_c})
             logger.store({'Value/reward': value_r})
-
+            if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+                f_next_obs = next_obs.unsqueeze(0) if f_next_obs is None else torch.concat([f_next_obs, next_obs.unsqueeze(0)], axis=0)
+                f_costs = cost.unsqueeze(0) if f_costs is None else torch.concat([f_costs, cost.unsqueeze(0)], axis=0)
+            # print(info)
             buffer.store(
                 obs=obs,
                 act=act,
@@ -100,8 +111,23 @@ class OnPolicyAdapter(OnlineAdapter):
                 value_c=value_c,
                 logp=logp,
             )
+            if "final_observation" in info:
+                if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+                    f_risks = torch.empty_like(f_costs)
+                    for i in range(self._num_envs):
+                        f_risks[:, i] = compute_fear(f_costs[:, i])
+                    e_risks = f_risks.view(-1, 1).cpu().numpy()
+                    e_risks_quant = torch.Tensor(np.apply_along_axis(lambda x: np.histogram(x, bins=self._risk_bins)[0], 1, np.expand_dims(e_risks, 1))).to(self._device)
+                    risk_rb.add(None, f_next_obs.view(-1, obs_size), None, None, None, None, e_risks_quant, f_risks.view(-1, 1))
+
+                    f_next_obs, f_costs = None, None
+                with torch.no_grad():
+                    final_risk = risk_model(info["final_observation"]) if self._cfgs.risk_cfgs.use_risk  else None
+
 
             obs = next_obs
+            with torch.no_grad():
+                risk = risk_model(obs) if self._cfgs.risk_cfgs.use_risk else None
             epoch_end = step >= steps_per_epoch - 1
             for idx, (done, time_out) in enumerate(zip(terminated, truncated)):
                 if epoch_end or done or time_out:
@@ -112,10 +138,12 @@ class OnPolicyAdapter(OnlineAdapter):
                             logger.log(
                                 f'Warning: trajectory cut off when rollout by epoch at {self._ep_len[idx]} steps.',
                             )
-                            _, last_value_r, last_value_c, _ = agent.step(obs[idx])
+                            risk_idx = risk[idx] if risk is not None else None
+                            _, last_value_r, last_value_c, _ = agent.step(obs[idx], risk_idx)
                         if time_out:
+                            final_risk_idx = final_risk[idx] if final_risk is not None else None
                             _, last_value_r, last_value_c, _ = agent.step(
-                                info['final_observation'][idx],
+                                info['final_observation'][idx], final_risk_idx
                             )
                         last_value_r = last_value_r.unsqueeze(0)
                         last_value_c = last_value_c.unsqueeze(0)
@@ -127,6 +155,7 @@ class OnPolicyAdapter(OnlineAdapter):
                         self._ep_ret[idx] = 0.0
                         self._ep_cost[idx] = 0.0
                         self._ep_len[idx] = 0.0
+
 
                     buffer.finish_path(last_value_r, last_value_c, idx)
 

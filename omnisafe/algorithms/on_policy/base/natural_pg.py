@@ -89,9 +89,9 @@ class NaturalPG(PolicyGradient):
             The Fisher vector product.
         """
         self._actor_critic.actor.zero_grad()
-        q_dist = self._actor_critic.actor(self._fvp_obs)
+        q_dist = self._actor_critic.actor(self._fvp_obs, self._fvp_risk)
         with torch.no_grad():
-            p_dist = self._actor_critic.actor(self._fvp_obs)
+            p_dist = self._actor_critic.actor(self._fvp_obs, self._fvp_risk)
         kl = torch.distributions.kl.kl_divergence(p_dist, q_dist).mean()
 
         grads = torch.autograd.grad(
@@ -125,6 +125,7 @@ class NaturalPG(PolicyGradient):
         logp: torch.Tensor,
         adv_r: torch.Tensor,
         adv_c: torch.Tensor,
+        risk: torch.Tensor,
     ) -> None:
         r"""Update policy network.
 
@@ -148,10 +149,11 @@ class NaturalPG(PolicyGradient):
             AssertionError: If :math:`\alpha` is not finite.
         """
         self._fvp_obs = obs[:: self._cfgs.algo_cfgs.fvp_sample_freq]
+        self._fvp_risk = None if risk is None else risk[:: self._cfgs.algo_cfgs.fvp_sample_freq]
         theta_old = get_flat_params_from(self._actor_critic.actor)
         self._actor_critic.actor.zero_grad()
         adv = self._compute_adv_surrogate(adv_r, adv_c)
-        loss = self._loss_pi(obs, act, logp, adv)
+        loss = self._loss_pi(obs, act, logp, adv, risk)
 
         loss.backward()
         distributed.avg_grads(self._actor_critic.actor)
@@ -204,7 +206,9 @@ class NaturalPG(PolicyGradient):
             data['adv_r'],
             data['adv_c'],
         )
-        self._update_actor(obs, act, logp, adv_r, adv_c)
+        with torch.no_grad():
+            risk = self.risk_model(data['obs']) if self._cfgs.risk_cfgs.use_risk else None
+        self._update_actor(obs, act, logp, adv_r, adv_c, risk)
 
         dataloader = DataLoader(
             dataset=TensorDataset(obs, target_value_r, target_value_c),
@@ -218,9 +222,11 @@ class NaturalPG(PolicyGradient):
                 target_value_r,
                 target_value_c,
             ) in dataloader:
-                self._update_reward_critic(obs, target_value_r)
+                with torch.no_grad():
+                    risk_b = self.risk_model(obs) if self._cfgs.risk_cfgs.use_risk else None
+                self._update_reward_critic(obs, risk_b, target_value_r)
                 if self._cfgs.algo_cfgs.use_cost:
-                    self._update_cost_critic(obs, target_value_c)
+                    self._update_cost_critic(obs, risk_b, target_value_c)
 
         self._logger.store(
             {

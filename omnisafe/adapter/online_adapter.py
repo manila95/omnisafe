@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 import torch
-
+import numpy as np
 from omnisafe.envs.core import CMDP, make, support_envs
 from omnisafe.envs.wrapper import (
     ActionScale,
@@ -64,6 +64,8 @@ class OnlineAdapter:
         self._env_id: str = env_id
         self._env: CMDP = make(env_id, num_envs=num_envs, device=self._device)
         self._eval_env: CMDP = make(env_id, num_envs=1, device=self._device)
+        self._num_envs = num_envs
+        self._risk_bins = np.array([i*cfgs.risk_cfgs.quantile_size for i in range(cfgs.risk_cfgs.quantile_num)])
 
         self._wrapper(
             obs_normalize=cfgs.algo_cfgs.obs_normalize,

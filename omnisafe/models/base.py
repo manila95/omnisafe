@@ -53,6 +53,8 @@ class Actor(nn.Module, ABC):
         hidden_sizes: list[int],
         activation: Activation = 'relu',
         weight_initialization_mode: InitFunction = 'kaiming_uniform',
+        use_risk=False,
+        risk_size=2,
     ) -> None:
         """Initialize an instance of :class:`Actor`."""
         nn.Module.__init__(self)
@@ -62,6 +64,8 @@ class Actor(nn.Module, ABC):
         self._activation: Activation = activation
         self._hidden_sizes: list[int] = hidden_sizes
         self._after_inference: bool = False
+        self._use_risk = use_risk
+        self._risk_size = risk_size
 
         if isinstance(self._obs_space, spaces.Box) and len(self._obs_space.shape) == 1:
             self._obs_dim: int = self._obs_space.shape[0]
@@ -74,7 +78,7 @@ class Actor(nn.Module, ABC):
             raise NotImplementedError
 
     @abstractmethod
-    def _distribution(self, obs: torch.Tensor) -> Distribution:
+    def _distribution(self, obs: torch.Tensor, risk: torch.Tensor=None) -> Distribution:
         r"""Return the distribution of action.
 
         An actor generates a distribution, which is used to sample actions during training. When
@@ -103,7 +107,7 @@ class Actor(nn.Module, ABC):
         """
 
     @abstractmethod
-    def forward(self, obs: torch.Tensor) -> Distribution:
+    def forward(self, obs: torch.Tensor, risk: torch.Tensor=None) -> Distribution:
         """Return the distribution of action.
 
         Args:
@@ -114,6 +118,7 @@ class Actor(nn.Module, ABC):
     def predict(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor = None,
         deterministic: bool = False,
     ) -> torch.Tensor:
         r"""Predict deterministic or stochastic action based on observation.
@@ -189,6 +194,8 @@ class Critic(nn.Module, ABC):
         weight_initialization_mode: InitFunction = 'kaiming_uniform',
         num_critics: int = 1,
         use_obs_encoder: bool = False,
+        use_risk: bool = False,
+        risk_size: int = 2,
     ) -> None:
         """Initialize an instance of :class:`Critic`."""
         nn.Module.__init__(self)
@@ -199,6 +206,8 @@ class Critic(nn.Module, ABC):
         self._hidden_sizes: list[int] = hidden_sizes
         self._num_critics: int = num_critics
         self._use_obs_encoder: bool = use_obs_encoder
+        self._use_risk = use_risk
+        self._risk_size = risk_size
 
         if isinstance(self._obs_space, spaces.Box) and len(self._obs_space.shape) == 1:
             self._obs_dim = self._obs_space.shape[0]

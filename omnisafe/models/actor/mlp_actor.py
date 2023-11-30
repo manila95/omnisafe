@@ -49,6 +49,8 @@ class MLPActor(Actor):
         activation: Activation = 'relu',
         output_activation: Activation = 'tanh',
         weight_initialization_mode: InitFunction = 'kaiming_uniform',
+        use_risk: bool = False,
+        risk_size: int = 2,
     ) -> None:
         """Initialize an instance of :class:`MLPActor`."""
         super().__init__(obs_space, act_space, hidden_sizes, activation, weight_initialization_mode)
@@ -58,12 +60,15 @@ class MLPActor(Actor):
             activation=activation,
             output_activation=output_activation,
             weight_initialization_mode=weight_initialization_mode,
+            use_risk=use_risk,
+            risk_size=risk_size
         )
         self._noise: float = 0.1
 
     def predict(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor = None,
         deterministic: bool = True,
     ) -> torch.Tensor:
         """Predict the action given observation.
@@ -77,7 +82,7 @@ class MLPActor(Actor):
             obs (torch.Tensor): Observation from environments.
             deterministic (bool, optional): Whether to use deterministic policy. Defaults to True.
         """
-        action = self.net(obs)
+        action = self.net(obs, risk) if self._use_risk else self.net(obs)
         if deterministic:
             return action
         with torch.no_grad():
@@ -95,10 +100,10 @@ class MLPActor(Actor):
         assert noise >= 0, 'Noise should be non-negative.'
         self._noise = noise
 
-    def _distribution(self, obs: torch.Tensor) -> Distribution:
+    def _distribution(self, obs: torch.Tensor, risk: torch.Tensor = None) -> Distribution:
         raise NotImplementedError
 
-    def forward(self, obs: torch.Tensor) -> Distribution:
+    def forward(self, obs: torch.Tensor, risk: torch.Tensor = None) -> Distribution:
         """Forward method implementation.
 
         Args:
@@ -107,7 +112,7 @@ class MLPActor(Actor):
         Returns:
             The distribution of the action.
         """
-        return self._distribution(obs)
+        return self._distribution(obs, risk)
 
     def log_prob(self, act: torch.Tensor) -> torch.Tensor:
         """Log probability of the action.
