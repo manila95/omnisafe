@@ -121,7 +121,7 @@ defaults:
   # risk configurations 
   risk_cfgs:
     # whether to use the risk model
-    use_risk: False
+    use_risk: True
     # Fear radius for binary risk
     fear_radius: 10
     # risk type:
