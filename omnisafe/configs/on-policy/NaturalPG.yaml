@@ -143,7 +143,7 @@ defaults:
     # risk batch size 
     risk_batch_size: 1000
     # risk learning rate 
-    risk_lr: 1e-5
+    risk_lr: 0.00001
     # risk update type 
     risk_update_type: "dataset"
     # risk epochs
@@ -154,4 +154,3 @@ defaults:
     fine_tune_risk: False
     # risk weight
     risk_weight: 1.0
-

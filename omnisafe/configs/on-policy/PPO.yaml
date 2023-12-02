@@ -121,7 +121,7 @@ defaults:
   # risk configurations 
   risk_cfgs:
     # whether to use the risk model
-    use_risk: True
+    use_risk: False
     # Fear radius for binary risk
     fear_radius: 10
     # risk type:
@@ -143,7 +143,7 @@ defaults:
     # number of samples to train risk on
     num_risk_samples: 30000
     # whether to fine tune risk 
-    fine_tune_risk: True
+    fine_tune_risk: False
     # risk weight
     risk_weight: 1.0
 
