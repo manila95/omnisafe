@@ -91,6 +91,7 @@ if __name__ == '__main__':
     agent = omnisafe.Agent(
         args.algo,
         args.env_id,
+        args.seed,
         train_terminal_cfgs=vars(args),
         custom_cfgs=custom_cfgs,
     )
