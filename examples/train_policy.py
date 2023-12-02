@@ -72,6 +72,13 @@ if __name__ == '__main__':
         metavar='THREADS',
         help='number of threads to use for torch',
     )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=0,
+        metavar='SEED',
+        help='random seed',
+    )
     args, unparsed_args = parser.parse_known_args()
     keys = [k[2:] for k in unparsed_args[0::2]]
     values = list(unparsed_args[1::2])
