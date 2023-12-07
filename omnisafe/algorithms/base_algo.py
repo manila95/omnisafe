@@ -51,7 +51,7 @@ class BaseAlgo(ABC):  # pylint: disable=too-few-public-methods
         if cfgs.risk_cfgs.use_risk:
             self._init_risk_model()
 
-        if cfgs.risk_cfgs.fine_tune_risk:
+        if cfgs.risk_cfgs.fine_tune_risk and cfgs.risk_cfgs.use_risk:
             self._init_risk_update()
         
         self._init_model()

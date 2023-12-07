@@ -126,6 +126,35 @@ defaults:
       activation: tanh
       # learning rate
       lr: 0.0003
+  # risk configurations 
+  risk_cfgs:
+    # whether to use the risk model
+    use_risk: True
+    # Fear radius for binary risk
+    fear_radius: 10
+    # risk type:
+    risk_type: "quantile"
+    # number of quantiles
+    quantile_num: 10
+    # size of quantiles
+    quantile_size: 4
+    # pretrained risk model path 
+    risk_model_path: None
+    # risk batch size 
+    risk_batch_size: 1000
+    # risk learning rate 
+    risk_lr: 0.00001
+    # risk update type 
+    risk_update_type: "dataset"
+    # risk epochs
+    num_risk_epochs: 30
+    # number of samples to train risk on
+    num_risk_samples: 30000
+    # whether to fine tune risk 
+    fine_tune_risk: False
+    # risk weight
+    risk_weight: 1.0
+
 
 SafetyCarCircle1-v0:
   # algorithm configurations
