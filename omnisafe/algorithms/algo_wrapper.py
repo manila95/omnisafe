@@ -60,6 +60,7 @@ class AlgoWrapper:
         seed: int,
         train_terminal_cfgs: dict[str, Any] | None = None,
         custom_cfgs: dict[str, Any] | None = None,
+        risk_cfgs: dict[str, Any] | None = None,
     ) -> None:
         """Initialize an instance of :class:`AlgoWrapper`."""
         self.algo: str = algo
@@ -68,6 +69,7 @@ class AlgoWrapper:
         # algo_type will set in _init_checks()
         self.train_terminal_cfgs: dict[str, Any] | None = train_terminal_cfgs
         self.custom_cfgs: dict[str, Any] | None = custom_cfgs
+        self.risk_cfgs: dict[str, Any] | None = risk_cfgs
         self._evaluator: Evaluator | None = None
         self._plotter: Plotter | None = None
         self.cfgs: Config = self._init_config()
@@ -133,6 +135,13 @@ class AlgoWrapper:
             # save configurations specified in current experiment
             cfgs.recurisve_update({'exp_increment_cfgs': {'train_cfgs': self.train_terminal_cfgs}})
 
+        if self.risk_cfgs:
+            # validate the keys of train_terminal_cfgs configuration
+            recursive_check_config(self.risk_cfgs, cfgs.risk_cfgs)
+            # update the cfgs.train_cfgs from train_terminal configurations
+            cfgs.risk_cfgs.recurisve_update(self.risk_cfgs)
+            # save configurations specified in current experiment
+            cfgs.recurisve_update({'exp_increment_cfgs': {'risk_cfgs': self.risk_cfgs}})
         # the exp_name format is PPO-{SafetyPointGoal1-v0}
         exp_name = f'{self.algo}-{{{self.env_id}}}'
         cfgs.recurisve_update({'exp_name': exp_name, 'env_id': self.env_id, 'algo': self.algo})

@@ -80,13 +80,18 @@ if __name__ == '__main__':
         help='random seed',
     )
     args, unparsed_args = parser.parse_known_args()
-    keys = [k[2:] for k in unparsed_args[0::2]]
-    values = list(unparsed_args[1::2])
+    print(unparsed_args)
+    keys = [k.split("=")[0][2:] for k in unparsed_args]
+    values = [k.split("=")[1] for k in unparsed_args]
+    #keys = [k[2:] for k in unparsed_args[0::2]]
+    #values = list(unparsed_args[1::2])
     unparsed_args = dict(zip(keys, values))
 
+    print(unparsed_args)
     custom_cfgs = {}
+    risk_cfgs = {}
     for k, v in unparsed_args.items():
-        update_dict(custom_cfgs, custom_cfgs_to_dict(k, v))
+        update_dict(risk_cfgs, custom_cfgs_to_dict(k, v))
 
     agent = omnisafe.Agent(
         args.algo,
@@ -94,5 +99,6 @@ if __name__ == '__main__':
         args.seed,
         train_terminal_cfgs=vars(args),
         custom_cfgs=custom_cfgs,
+        risk_cfgs=risk_cfgs,
     )
     agent.learn()
