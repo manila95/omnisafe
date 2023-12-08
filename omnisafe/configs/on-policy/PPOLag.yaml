@@ -87,7 +87,7 @@ defaults:
     # save model frequency
     save_model_freq: 100
     # save logger path
-    log_dir: "./runs"
+    log_dir: "./runs1"
     # save model path
     window_lens: 100
   # model configurations

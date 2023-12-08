@@ -87,6 +87,9 @@ if __name__ == '__main__':
     #values = list(unparsed_args[1::2])
     unparsed_args = dict(zip(keys, values))
 
+    #if "risk-lr" in unparsed_args.keys():
+    #    unparsed_args["risk-lr"] = float(unparsed_args["risk-lr"])
+
     print(unparsed_args)
     custom_cfgs = {}
     risk_cfgs = {}
