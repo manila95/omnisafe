@@ -332,6 +332,13 @@ class PolicyGradient(BaseAlgo):
         ep_len = self._logger.get_stats('Metrics/EpLen')[0]
         self._logger.close()
 
+        ## Save Policy 
+        torch.save(self._actor_critic.state_dict(), os.path.join(wandb.run.dir, "actor_critic.pt"))
+        wandb.save("actor_critic.pt")
+        if self._cfgs.risk_cfgs.use_risk:
+            torch.save(self.risk_model.state_dict(), os.path.join(wandb.run.dir, "risk_model.pt"))
+            wandb.save("risk_model.pt")
+
         return ep_ret, ep_cost, ep_len
 
     def _update(self) -> None:
