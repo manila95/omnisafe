@@ -58,6 +58,7 @@ class AlgoWrapper:
         algo: str,
         env_id: str,
         seed: int,
+        cost_limit: int,
         train_terminal_cfgs: dict[str, Any] | None = None,
         custom_cfgs: dict[str, Any] | None = None,
         risk_cfgs: dict[str, Any] | None = None,
@@ -66,6 +67,7 @@ class AlgoWrapper:
         self.algo: str = algo
         self.env_id: str = env_id
         self.seed: int = seed
+        self.cost_limit: int = cost_limit
         # algo_type will set in _init_checks()
         self.train_terminal_cfgs: dict[str, Any] | None = train_terminal_cfgs
         self.custom_cfgs: dict[str, Any] | None = custom_cfgs
@@ -106,6 +108,7 @@ class AlgoWrapper:
 
         ## setting seed 
         cfgs.seed = self.seed
+        cfgs.algo_cfgs.cost_limit = self.cost_limit
         # update the cfgs from custom configurations
         if self.custom_cfgs:
             # avoid repeatedly record the env_id and algo
@@ -113,6 +116,8 @@ class AlgoWrapper:
                 self.custom_cfgs.pop('env_id')
             if 'algo' in self.custom_cfgs:
                 self.custom_cfgs.pop('algo')
+            if 'cost_limit' in self.custom_cfgs:
+                self.custom_cfgs.pop('cost_limit')
             # validate the keys of custom configuration
             recursive_check_config(self.custom_cfgs, cfgs)
             # update the cfgs from custom configurations
@@ -128,6 +133,8 @@ class AlgoWrapper:
                 self.train_terminal_cfgs.pop('algo')
             if 'seed' in self.train_terminal_cfgs:
                 self.train_terminal_cfgs.pop('seed')
+            if 'cost_limit' in self.train_terminal_cfgs:
+                self.train_terminal_cfgs.pop('cost_limit')
             # validate the keys of train_terminal_cfgs configuration
             recursive_check_config(self.train_terminal_cfgs, cfgs.train_cfgs)
             # update the cfgs.train_cfgs from train_terminal configurations
