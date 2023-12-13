@@ -38,6 +38,13 @@ if __name__ == '__main__':
         help='the name of test environment',
     )
     parser.add_argument(
+        '--cost-limit',
+        default=25,
+        type=int,
+        metavar='N',
+        help='number of paralleled progress for calculations.',
+    )
+    parser.add_argument(
         '--parallel',
         default=1,
         type=int,
@@ -100,6 +107,7 @@ if __name__ == '__main__':
         args.algo,
         args.env_id,
         args.seed,
+        args.cost_limit,
         train_terminal_cfgs=vars(args),
         custom_cfgs=custom_cfgs,
         risk_cfgs=risk_cfgs,
