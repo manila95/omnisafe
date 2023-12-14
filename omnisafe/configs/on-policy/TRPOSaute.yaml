@@ -160,6 +160,9 @@ defaults:
     fine_tune_risk: True
     # risk weight
     risk_weight: 1.0
+    # whether to normalize risk b/w 0 and 1 
+    normalize_risk: True
+
 
 
 SafetyCarCircle1-v0:

@@ -137,7 +137,7 @@ defaults:
     # number of quantiles
     quantile_num: 10
     # size of quantiles
-    quantile_size: 4
+    quantile_size: 0.1
     # pretrained risk model path 
     risk_model_path: None
     # risk batch size 
@@ -154,4 +154,6 @@ defaults:
     fine_tune_risk: False
     # risk weight
     risk_weight: 1.0
+    # whether to normalize risk b/w 0 and 1 
+    normalize_risk: True
 

@@ -90,7 +90,7 @@ class OnPolicyAdapter(OnlineAdapter):
         ):
             with torch.no_grad():
                 risk = None if not self._cfgs.risk_cfgs.use_risk else risk_model(obs)
-            act, value_r, value_c, logp = agent.step(obs, risk)
+            act, value_r, value_c, logp = agent.step(obs, risk) 
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
 
             self._log_value(reward=reward, cost=cost, info=info)
@@ -116,6 +116,8 @@ class OnPolicyAdapter(OnlineAdapter):
                     f_risks = torch.empty_like(f_costs)
                     for i in range(self._num_envs):
                         f_risks[:, i] = compute_fear(f_costs[:, i])
+                    if self._cfgs.risk_cfgs.normalize_risk:
+                        f_risks = -torch.log(torch.clamp(f_risks, 1, self._cfgs.risk_cfgs.fear_radius)  / self._cfgs.risk_cfgs.fear_radius) / torch.log(torch.Tensor([self._cfgs.risk_cfgs.fear_radius]))
                     e_risks = f_risks.view(-1, 1).cpu().numpy()
                     e_risks_quant = torch.Tensor(np.apply_along_axis(lambda x: np.histogram(x, bins=self._risk_bins)[0], 1, np.expand_dims(e_risks, 1))).to(self._device)
                     risk_rb.add(None, f_next_obs.view(-1, obs_size), None, None, None, None, e_risks_quant, f_risks.view(-1, 1))
