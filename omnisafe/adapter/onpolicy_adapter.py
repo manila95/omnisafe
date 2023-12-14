@@ -94,6 +94,10 @@ class OnPolicyAdapter(OnlineAdapter):
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
 
             self._log_value(reward=reward, cost=cost, info=info)
+            if risk is not None:
+                risk_np = risk.cpu().numpy()
+                risk_reward = self._cfgs.risk_cfgs.reward_factor * np.sum(np.multiply(np.exp(risk_np), self._risk_bins), axis=-1)
+                reward -= risk_reward
 
             if self._cfgs.algo_cfgs.use_cost:
                 logger.store({'Value/cost': value_c})
