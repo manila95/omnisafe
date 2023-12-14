@@ -168,7 +168,8 @@ defaults:
     risk_weight: 1.0
     # whether to normalize risk b/w 0 and 1 
     normalize_risk: True
-
+    # multiplicative constant for reward shaping
+    reward_factor: 0.0
 
 
 SafetyCarGoal1-v0:
