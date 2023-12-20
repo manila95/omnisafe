@@ -127,7 +127,7 @@ class PolicyGradient(BaseAlgo):
 
         self.risk_model = BayesRiskEst(obs_size=self._env.observation_space.shape[0], batch_norm=True, out_size=self.risk_size)
         if os.path.exists(self._cfgs.risk_cfgs.risk_model_path):
-            self.risk_model.load_state_dict(torch.load(self._cfgs.risk_model_path, map_location=self._device))
+            self.risk_model.load_state_dict(torch.load(self._cfgs.risk_cfgs.risk_model_path, map_location=self._device))
 
         self.risk_model.to(self._device)
         self.risk_model.eval()
