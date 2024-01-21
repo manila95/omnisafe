@@ -125,9 +125,10 @@ class OnPolicyAdapter(OnlineAdapter):
             #     with torch.no_grad():
             #         final_risk = risk_model(info["final_observation"]) if self._cfgs.risk_cfgs.use_risk  else None
 
-            net_loss = 0
-            risk_model.train()
+
             if self._cfgs.risk_cfgs.fine_tune_risk and len(risk_rb) > self._cfgs.risk_cfgs.risk_batch_size and self.global_step % self._cfgs.risk_cfgs.risk_update_period == 0:
+                net_loss = 0
+                risk_model.train()
                 risk_data = risk_rb.sample(self._cfgs.risk_cfgs.risk_batch_size)
                 pred_risk = risk_model(risk_data["next_obs"])
                 risk_loss = risk_criterion(pred_risk, torch.argmax(risk_data["risks"].squeeze(), axis=1))
@@ -135,8 +136,8 @@ class OnPolicyAdapter(OnlineAdapter):
                 risk_loss.backward()
                 opt_risk.step()
                 net_loss += risk_loss.item()
-            logger.store({'Risk/risk_loss': net_loss})
-            risk_model.eval()
+                logger.store({'Risk/risk_loss': net_loss})
+                risk_model.eval()
             self.global_step += self.num_envs
             obs = next_obs
             with torch.no_grad():
