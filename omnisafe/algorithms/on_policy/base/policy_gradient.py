@@ -79,6 +79,7 @@ class PolicyGradient(BaseAlgo):
             // distributed.world_size()
             // self._cfgs.train_cfgs.vector_env_nums
         )
+        self.global_step = 0
 
     def _init_model(self) -> None:
         """Initialize the model.
@@ -137,7 +138,7 @@ class PolicyGradient(BaseAlgo):
 
         self.opt_risk = torch.optim.Adam(self.risk_model.parameters(), lr=self._cfgs.risk_cfgs.risk_lr, eps=1e-10)
 
-        self.risk_rb = ReplayBuffer()
+        self.risk_rb = ReplayBuffer(fear_radius=self._cfgs.risk_cfgs.fear_radius)
 
         if self._cfgs.risk_cfgs.risk_type == "quantile":
             weight_tensor = torch.Tensor([1]*self._cfgs.risk_cfgs.quantile_num).to(self._device)
@@ -258,6 +259,9 @@ class PolicyGradient(BaseAlgo):
             self._logger.register_key('Loss/Loss_cost_critic', delta=True)
             self._logger.register_key('Value/cost')
 
+        if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+            self._logger.register_key('Risk/risk_loss', delta=True)
+
         self._logger.register_key('Time/Total')
         self._logger.register_key('Time/Rollout')
         self._logger.register_key('Time/Update')
@@ -292,11 +296,13 @@ class PolicyGradient(BaseAlgo):
                 logger=self._logger,
                 risk_rb=self.risk_rb if self._cfgs.risk_cfgs.fine_tune_risk else None,
                 risk_model=self.risk_model if self._cfgs.risk_cfgs.use_risk else None,
+                opt_risk=self.opt_risk if self._cfgs.risk_cfgs.use_risk else None,
+                risk_criterion=self.risk_criterion if self._cfgs.risk_cfgs.use_risk else None,
             )
             self._logger.store({'Time/Rollout': time.time() - rollout_time})
             
-            if self._cfgs.risk_cfgs.fine_tune_risk:
-                self._risk_update_online()
+            # if self._cfgs.risk_cfgs.fine_tune_risk:
+            #     self._risk_update_online()
 
             update_time = time.time()
             self._update()
@@ -444,30 +450,6 @@ class PolicyGradient(BaseAlgo):
                 'Train/KL': final_kl,
             },
         )
-
-    def _risk_update_online(self):
-            if self._cfgs.risk_cfgs.risk_update_type == "dataset":
-                risk_data = self.risk_rb.sample(self._cfgs.risk_cfgs.num_risk_samples)
-                risk_dataset = RiskyDataset(risk_data["next_obs"].to(self._device), None, risk_data["dist_to_fail"].to(self._device), False, risk_type=self._cfgs.risk_cfgs.risk_type,
-                                        fear_clip=None, fear_radius=self._cfgs.risk_cfgs.fear_radius, one_hot=True, quantile_size=self._cfgs.risk_cfgs.quantile_size, quantile_num=self._cfgs.risk_cfgs.quantile_num)
-                risk_dataloader = DataLoader(risk_dataset, batch_size=self._cfgs.risk_cfgs.risk_batch_size, shuffle=True, num_workers=4, generator=torch.Generator(device=self._device))
-
-                net_loss = train_risk(self.risk_model, risk_dataloader, self.risk_criterion, self.opt_risk, self._cfgs.risk_cfgs.num_risk_epochs, self._device)
-                risk_data, risk_dataset, risk_dataloader = None, None, None
-            elif self._cfgs.risk_cfgs.risk_update_type == "batch":
-                net_loss = 0
-                self.risk_model.train()
-                for _ in tqdm.tqdm(range(self._cfgs.risk_cfgs.num_risk_epochs)):
-                    risk_data = self.risk_rb.sample(self._cfgs.risk_cfgs.risk_batch_size)
-                    pred_risk = self.risk_model(risk_data["next_obs"].to(self._device))
-                    risk_loss = self.risk_criterion(pred_risk, torch.argmax(risk_data["risks"].squeeze(), axis=1).to(self._device))
-                    self.opt_risk.zero_grad()
-                    risk_loss.backward()
-                    self.opt_risk.step()
-                    net_loss += risk_loss.item()
-            net_loss /= self._cfgs.risk_cfgs.num_risk_epochs
-            # logger.store(**{"risk/risk_loss": net_loss})
-            self.risk_model.eval()
 
     def _update_reward_critic(self, obs: torch.Tensor, risk: torch.Tensor, target_value_r: torch.Tensor) -> None:
         r"""Update value network under a double for loop.

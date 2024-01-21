@@ -137,7 +137,7 @@ defaults:
     # whether to use the risk model
     use_risk: True
     # Fear radius for binary risk
-    fear_radius: 10
+    fear_radius: 40
     # risk type:
     risk_type: "quantile"
     # number of quantiles
@@ -164,7 +164,14 @@ defaults:
     normalize_risk: True
     # multiplicative constant for reward shaping
     reward_factor: 0.0
+    # period to update risk 
+    risk_update_period: 10
 
+    early_termination: False
+    term_cost: 1
+    reward_distance: 1.0
+    reward_goal: 1.0
+    failure_penalty: 0
 
 SafetyCarCircle1-v0:
   # algorithm configurations

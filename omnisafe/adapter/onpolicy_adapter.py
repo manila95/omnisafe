@@ -56,6 +56,9 @@ class OnPolicyAdapter(OnlineAdapter):
         """Initialize an instance of :class:`OnPolicyAdapter`."""
         super().__init__(env_id, num_envs, seed, cfgs)
         self._reset_log()
+        self.num_envs = num_envs
+        self.global_step = 0
+        self.risk_bins = np.array([i*self._cfgs.risk_cfgs.quantile_size for i in range(self._cfgs.risk_cfgs.quantile_num)])
 
     def rollout(  # pylint: disable=too-many-locals
         self,
@@ -65,6 +68,8 @@ class OnPolicyAdapter(OnlineAdapter):
         logger: Logger,
         risk_rb=None,
         risk_model=None,
+        opt_risk=None,
+        risk_criterion=None,
     ) -> None:
         """Rollout the environment and store the data in the buffer.
 
@@ -103,8 +108,9 @@ class OnPolicyAdapter(OnlineAdapter):
                 logger.store({'Value/cost': value_c})
             logger.store({'Value/reward': value_r})
             if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
-                f_next_obs = next_obs.unsqueeze(0) if f_next_obs is None else torch.concat([f_next_obs, next_obs.unsqueeze(0)], axis=0)
-                f_costs = cost.unsqueeze(0) if f_costs is None else torch.concat([f_costs, cost.unsqueeze(0)], axis=0)
+                for i in range(self.num_envs):
+                    f_next_obs = next_obs.unsqueeze(0) if f_next_obs is None else torch.concat([f_next_obs, next_obs.unsqueeze(0)], axis=0)
+                    f_costs = cost.unsqueeze(0) if f_costs is None else torch.concat([f_costs, cost.unsqueeze(0)], axis=0)
             # print(info)
             buffer.store(
                 obs=obs,
@@ -115,22 +121,23 @@ class OnPolicyAdapter(OnlineAdapter):
                 value_c=value_c,
                 logp=logp,
             )
-            if "final_observation" in info:
-                if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
-                    f_risks = torch.empty_like(f_costs)
-                    for i in range(self._num_envs):
-                        f_risks[:, i] = compute_fear(f_costs[:, i])
-                    if self._cfgs.risk_cfgs.normalize_risk:
-                        f_risks = -torch.log(torch.clamp(f_risks, 1, self._cfgs.risk_cfgs.fear_radius)  / self._cfgs.risk_cfgs.fear_radius) / torch.log(torch.Tensor([self._cfgs.risk_cfgs.fear_radius]))
-                    e_risks = f_risks.view(-1, 1).cpu().numpy()
-                    e_risks_quant = torch.Tensor(np.apply_along_axis(lambda x: np.histogram(x, bins=self._risk_bins)[0], 1, np.expand_dims(e_risks, 1))).to(self._device)
-                    risk_rb.add(None, f_next_obs.view(-1, obs_size), None, None, None, None, e_risks_quant, f_risks.view(-1, 1))
+            # if "final_observation" in info:
+            #     with torch.no_grad():
+            #         final_risk = risk_model(info["final_observation"]) if self._cfgs.risk_cfgs.use_risk  else None
 
-                    f_next_obs, f_costs = None, None
-                with torch.no_grad():
-                    final_risk = risk_model(info["final_observation"]) if self._cfgs.risk_cfgs.use_risk  else None
-
-
+            net_loss = 0
+            risk_model.train()
+            if self._cfgs.risk_cfgs.fine_tune_risk and len(risk_rb) > self._cfgs.risk_cfgs.risk_batch_size and self.global_step % self._cfgs.risk_cfgs.risk_update_period == 0:
+                risk_data = risk_rb.sample(self._cfgs.risk_cfgs.risk_batch_size)
+                pred_risk = risk_model(risk_data["next_obs"])
+                risk_loss = risk_criterion(pred_risk, torch.argmax(risk_data["risks"].squeeze(), axis=1))
+                opt_risk.zero_grad()
+                risk_loss.backward()
+                opt_risk.step()
+                net_loss += risk_loss.item()
+            logger.store({'Risk/risk_loss': net_loss})
+            risk_model.eval()
+            self.global_step += self.num_envs
             obs = next_obs
             with torch.no_grad():
                 risk = risk_model(obs) if self._cfgs.risk_cfgs.use_risk else None
@@ -147,7 +154,8 @@ class OnPolicyAdapter(OnlineAdapter):
                             risk_idx = risk[idx] if risk is not None else None
                             _, last_value_r, last_value_c, _ = agent.step(obs[idx], risk_idx)
                         if time_out:
-                            final_risk_idx = final_risk[idx] if final_risk is not None else None
+                            with torch.no_grad():
+                                final_risk_idx = risk_model(info['final_observation'])[idx] if self._cfgs.risk_cfgs.use_risk else None
                             _, last_value_r, last_value_c, _ = agent.step(
                                 info['final_observation'][idx], final_risk_idx
                             )
@@ -162,6 +170,16 @@ class OnPolicyAdapter(OnlineAdapter):
                         self._ep_cost[idx] = 0.0
                         self._ep_len[idx] = 0.0
 
+            if "final_observation" in info:
+                if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+                    f_risks = torch.empty_like(f_costs)
+                    for i in range(self.num_envs):
+                        f_risks[:, i] = compute_fear(f_costs[:, i])
+                    f_risks = f_risks.view(-1, 1)
+                    e_risks_quant = torch.Tensor(np.apply_along_axis(lambda x: np.histogram(x, bins=self.risk_bins)[0], 1, f_risks.cpu().numpy()))
+                    risk_rb.add(None, f_next_obs.view(-1, obs_size), None, None, None, None, e_risks_quant, f_risks)
+
+                    f_next_obs, f_costs = None, None
 
                     buffer.finish_path(last_value_r, last_value_c, idx)
 
