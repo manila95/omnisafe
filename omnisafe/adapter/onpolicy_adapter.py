@@ -75,7 +75,7 @@ class OnPolicyAdapter(OnlineAdapter):
         Args:
             steps_per_epoch (int): Number of steps per epoch.
             agent (ConstraintActorCritic): Constraint actor-critic, including actor , reward critic
-                and cost critic.
+                and cost critic.x
             buffer (VectorOnPolicyBuffer): Vector on-policy buffer.
             logger (Logger): Logger, to log ``EpRet``, ``EpCost``, ``EpLen``.
         """
@@ -90,10 +90,14 @@ class OnPolicyAdapter(OnlineAdapter):
         ):
             with torch.no_grad():
                 risk = None if not self._cfgs.risk_cfgs.use_risk else risk_model(obs)
-            act, value_r, value_c, logp = agent.step(obs, risk)
+            act, value_r, value_c, logp = agent.step(obs, risk) 
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
 
             self._log_value(reward=reward, cost=cost, info=info)
+            #if risk is not None:
+            #    risk_np = risk.cpu().numpy()
+            #    risk_reward = self._cfgs.risk_cfgs.reward_factor * np.sum(np.multiply(np.exp(risk_np), self._risk_bins), axis=-1)
+            #    reward -= risk_reward
 
             if self._cfgs.algo_cfgs.use_cost:
                 logger.store({'Value/cost': value_c})
@@ -123,7 +127,6 @@ class OnPolicyAdapter(OnlineAdapter):
                     f_next_obs, f_costs = None, None
                 with torch.no_grad():
                     final_risk = risk_model(info["final_observation"]) if self._cfgs.risk_cfgs.use_risk  else None
-
 
             obs = next_obs
             with torch.no_grad():

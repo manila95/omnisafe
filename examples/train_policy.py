@@ -86,6 +86,13 @@ if __name__ == '__main__':
         metavar='SEED',
         help='random seed',
     )
+    parser.add_argument(
+        '--unsafe-reward',
+        type=float,
+        default=-1,
+        metavar='SEED',
+        help='random seed',
+    )
     args, unparsed_args = parser.parse_known_args()
     print(unparsed_args)
     keys = [k.split("=")[0][2:] for k in unparsed_args]
@@ -107,7 +114,9 @@ if __name__ == '__main__':
         args.algo,
         args.env_id,
         args.seed,
+        #args.unsafe_reward,
         args.cost_limit,
+        args.unsafe_reward,
         train_terminal_cfgs=vars(args),
         custom_cfgs=custom_cfgs,
         risk_cfgs=risk_cfgs,

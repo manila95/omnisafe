@@ -154,4 +154,6 @@ defaults:
     fine_tune_risk: False
     # risk weight
     risk_weight: 1.0
+    # reward factor
+    reward_factor: 0.0
 

@@ -125,9 +125,11 @@ class PolicyGradient(BaseAlgo):
         risk_model_class = {"bayesian": {"continuous": BayesRiskEstCont, "binary": BayesRiskEst, "quantile": BayesRiskEst}, 
                     "mlp": {"continuous": RiskEst, "binary": RiskEst}} 
 
+        
         self.risk_model = BayesRiskEst(obs_size=self._env.observation_space.shape[0], batch_norm=True, out_size=self.risk_size)
         if os.path.exists(self._cfgs.risk_cfgs.risk_model_path):
-            self.risk_model.load_state_dict(torch.load(self._cfgs.risk_model_path, map_location=self._device))
+            self.risk_model.load_state_dict(torch.load(self._cfgs.risk_cfgs.risk_model_path, map_location=self._device))
+            print("Loaded Pretrained risk model")
 
         self.risk_model.to(self._device)
         self.risk_model.eval()
@@ -245,6 +247,8 @@ class PolicyGradient(BaseAlgo):
 
         self._logger.register_key('TotalEnvSteps')
 
+        if self._cfgs.risk_cfgs.use_risk:
+            self._logger.register_key("risk/risk_loss")
         # log information about actor
         self._logger.register_key('Loss/Loss_pi', delta=True)
         self._logger.register_key('Value/Adv')
@@ -466,7 +470,7 @@ class PolicyGradient(BaseAlgo):
                     self.opt_risk.step()
                     net_loss += risk_loss.item()
             net_loss /= self._cfgs.risk_cfgs.num_risk_epochs
-            # logger.store(**{"risk/risk_loss": net_loss})
+            self._logger.store({"risk/risk_loss": net_loss})
             self.risk_model.eval()
 
     def _update_reward_critic(self, obs: torch.Tensor, risk: torch.Tensor, target_value_r: torch.Tensor) -> None:

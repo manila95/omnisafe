@@ -83,9 +83,9 @@ defaults:
     # The sub-sampling rate of the observation
     fvp_sample_freq: 1
     # The safety budget, equal to the cost limit
-    safety_budget: 25.0
+    safety_budget: 10.0
     # the upper bound of safety budget
-    upper_budget: 25.0
+    upper_budget: 10.0
     # The saute gamma
     saute_gamma: 0.999
     # The max length of the episode

@@ -43,7 +43,7 @@ class BaseAlgo(ABC):  # pylint: disable=too-few-public-methods
         assert hasattr(cfgs.train_cfgs, 'device'), 'Please specify the device in the config file.'
         self._device: torch.device = get_device(self._cfgs.train_cfgs.device)
         self.risk_size = self._cfgs.risk_cfgs.quantile_num if self._cfgs.risk_cfgs.risk_type == "quantile" else 2
-
+        self._cfgs.risk_cfgs.use_risk = True if self._cfgs.risk_cfgs.risk_model_path != "None" else False 
         distributed.setup_distributed()
 
         self._init_env()
