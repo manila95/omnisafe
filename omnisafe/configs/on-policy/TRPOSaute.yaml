@@ -83,7 +83,7 @@ defaults:
     # The sub-sampling rate of the observation
     fvp_sample_freq: 1
     # The safety budget, equal to the cost limit
-    safety_budget: 25.0
+    safety_budget: 10.0
     # The saute gamma
     saute_gamma: 0.999
     # The max length of the episode
@@ -135,7 +135,7 @@ defaults:
   # risk configurations 
   risk_cfgs:
     # whether to use the risk model
-    use_risk: True
+    use_risk: False
     # Fear radius for binary risk
     fear_radius: 10
     # risk type:
@@ -157,11 +157,12 @@ defaults:
     # number of samples to train risk on
     num_risk_samples: 30000
     # whether to fine tune risk 
-    fine_tune_risk: True
+    fine_tune_risk: False
     # risk weight
     risk_weight: 1.0
-
-
+    # reward factor
+    reward_factor: 0.0
+    
 SafetyCarCircle1-v0:
   # algorithm configurations
   algo_cfgs:
