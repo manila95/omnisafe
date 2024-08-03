@@ -104,14 +104,14 @@ class QCritic(Critic):
                 )
                 critic = nn.Sequential(obs_encoder, net)
             else:
-                net = build_mlp_network(
+                critic = build_mlp_network(
                     [self._obs_dim + self._act_dim, *hidden_sizes, 1],
                     activation=activation,
                     weight_initialization_mode=weight_initialization_mode,
                     use_risk=use_risk,
                     risk_size=risk_size,
                 )
-                # critic = nn.Sequential(net)
+                # critic = net
             self.net_lst.append(critic)
             self.add_module(f'critic_{idx}', critic)
 

@@ -51,6 +51,7 @@ class VectorOffPolicyBuffer(OffPolicyBuffer):
 
     def __init__(  # pylint: disable=super-init-not-called,too-many-arguments
         self,
+        cfgs,
         obs_space: OmnisafeSpace,
         act_space: OmnisafeSpace,
         size: int,
@@ -78,6 +79,7 @@ class VectorOffPolicyBuffer(OffPolicyBuffer):
             )
         else:
             raise NotImplementedError
+        risk_buf = torch.zeros((size, num_envs, cfgs.risk_cfgs.quantile_num), dtype=torch.float32, device=device)
 
         if isinstance(act_space, Box):
             act_buf = torch.zeros(
@@ -95,6 +97,7 @@ class VectorOffPolicyBuffer(OffPolicyBuffer):
             'cost': torch.zeros((size, num_envs), dtype=torch.float32, device=device),
             'done': torch.zeros((size, num_envs), dtype=torch.float32, device=device),
             'next_obs': next_obs_buf,
+            'risk': risk_buf,
         }
 
     @property
@@ -122,17 +125,19 @@ class VectorOffPolicyBuffer(OffPolicyBuffer):
             device=self._device,
         )
 
-    def sample_batch(self) -> dict[str, torch.Tensor]:
+    def sample_batch(self, batch_size=None) -> dict[str, torch.Tensor]:
         """Sample a batch of data from the buffer.
 
         Returns:
             The sampled batch of data.
         """
+        batch_size = self._batch_size if batch_size is None else batch_size
+
         idx = torch.randint(
             0,
             self._size,
-            (self._batch_size * self._num_envs,),
+            (batch_size * self._num_envs,),
             device=self._device,
         )
-        env_idx = torch.arange(self._num_envs, device=self._device).repeat(self._batch_size)
+        env_idx = torch.arange(self._num_envs, device=self._device).repeat(batch_size)
         return {key: value[idx, env_idx] for key, value in self.data.items()}

@@ -21,6 +21,7 @@ from gymnasium.spaces import Box
 
 from omnisafe.common.buffer.base import BaseBuffer
 from omnisafe.typing import DEVICE_CPU, OmnisafeSpace
+from omnisafe.utils.config import Config
 
 
 class OffPolicyBuffer(BaseBuffer):
@@ -51,6 +52,7 @@ class OffPolicyBuffer(BaseBuffer):
 
     def __init__(  # pylint: disable=too-many-arguments
         self,
+        cfgs: Config,
         obs_space: OmnisafeSpace,
         act_space: OmnisafeSpace,
         size: int,
@@ -58,7 +60,7 @@ class OffPolicyBuffer(BaseBuffer):
         device: torch.device = DEVICE_CPU,
     ) -> None:
         """Initialize an instance of :class:`OffPolicyBuffer`."""
-        super().__init__(obs_space, act_space, size, device)
+        super().__init__(cfgs, obs_space, act_space, size, device)
         if isinstance(obs_space, Box):
             self.data['next_obs'] = torch.zeros(
                 (size, *obs_space.shape),
@@ -107,11 +109,16 @@ class OffPolicyBuffer(BaseBuffer):
         self._ptr = (self._ptr + 1) % self._max_size
         self._size = min(self._size + 1, self._max_size)
 
-    def sample_batch(self) -> dict[str, torch.Tensor]:
+    def store_risk(self, risks):
+        self.data["risk"][self._ptr-risks.size(0):self._ptr] = risks
+        # print(self.data["risk"].size())
+
+    def sample_batch(self, batch_size=None) -> dict[str, torch.Tensor]:
         """Sample a batch of data from the buffer.
 
         Returns:
             The sampled batch of data.
         """
-        idxs = torch.randint(0, self._size, (self._batch_size,))
+        batch_size = self._batch_size if batch_size is None else batch_size
+        idxs = torch.randint(0, self._size, (batch_size,))
         return {key: value[idxs] for key, value in self.data.items()}

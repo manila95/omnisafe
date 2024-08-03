@@ -68,7 +68,7 @@ class ConstraintActorQCritic(ActorQCritic):
         risk_size: int = 2,
     ) -> None:
         """Initialize an instance of :class:`ConstraintActorQCritic`."""
-        super().__init__(obs_space, act_space, model_cfgs, epochs)
+        super().__init__(obs_space, act_space, model_cfgs, epochs, use_risk, risk_size)
 
         self.cost_critic: Critic = CriticBuilder(
             obs_space=obs_space,

@@ -109,6 +109,8 @@ class DDPG(BaseAlgo):
             act_space=self._env.action_space,
             model_cfgs=self._cfgs.model_cfgs,
             epochs=self._epochs,
+            use_risk=self._cfgs.risk_cfgs.use_risk,
+            risk_size=self.risk_size
         ).to(self._device)
 
     def _init(self) -> None:
@@ -123,6 +125,7 @@ class DDPG(BaseAlgo):
             ...     self._model = CustomModel()
         """
         self._buf: VectorOffPolicyBuffer = VectorOffPolicyBuffer(
+            cfgs=self._cfgs,
             obs_space=self._env.observation_space,
             act_space=self._env.action_space,
             size=self._cfgs.algo_cfgs.size,
@@ -229,6 +232,9 @@ class DDPG(BaseAlgo):
         self._logger.register_key('Time/Epoch')
         self._logger.register_key('Time/FPS')
 
+        if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+            self._logger.register_key("Risk/risk_loss")
+
     def learn(self) -> tuple[float, float, float]:
         """This is main function for algorithm update.
 
@@ -283,11 +289,11 @@ class DDPG(BaseAlgo):
                 update_time += time.time() - update_start
 
             eval_start = time.time()
-            self._env.eval_policy(
-                episode=self._cfgs.train_cfgs.eval_episodes,
-                agent=self._actor_critic,
-                logger=self._logger,
-            )
+            # self._env.eval_policy(
+            #     episode=self._cfgs.train_cfgs.eval_episodes,
+            #     agent=self._actor_critic,
+            #     logger=self._logger,
+            # )
             eval_time = time.time() - eval_start
 
             self._logger.store({'Time/Update': update_time})
@@ -398,10 +404,12 @@ class DDPG(BaseAlgo):
             next_obs (torch.Tensor): The ``next observation`` sampled from buffer.
         """
         with torch.no_grad():
-            next_action = self._actor_critic.actor.predict(next_obs, deterministic=True)
-            next_q_value_r = self._actor_critic.target_reward_critic(next_obs, next_action)[0]
+            next_risk = self._env.risk_model(next_obs) if self._cfgs.risk_cfgs.use_risk else None
+            risk = self._env.risk_model(obs) if self._cfgs.risk_cfgs.use_risk else None
+            next_action = self._actor_critic.actor.predict(next_obs, next_risk, deterministic=True)
+            next_q_value_r = self._actor_critic.target_reward_critic(next_obs, next_action, next_risk)[0]
             target_q_value_r = reward + self._cfgs.algo_cfgs.gamma * (1 - done) * next_q_value_r
-        q_value_r = self._actor_critic.reward_critic(obs, action)[0]
+        q_value_r = self._actor_critic.reward_critic(obs, action, risk)[0]
         loss = nn.functional.mse_loss(q_value_r, target_q_value_r)
 
         if self._cfgs.algo_cfgs.use_critic_norm:
@@ -520,8 +528,10 @@ class DDPG(BaseAlgo):
         Returns:
             The loss of pi/actor.
         """
-        action = self._actor_critic.actor.predict(obs, deterministic=True)
-        return -self._actor_critic.reward_critic(obs, action)[0].mean()
+        with torch.no_grad():
+            risk = self._env.risk_model(obs) if self._cfgs.risk_cfgs.use_risk else None
+        action = self._actor_critic.actor.predict(obs, risk, deterministic=True)
+        return -self._actor_critic.reward_critic(obs, action, risk)[0].mean()
 
     def _log_when_not_update(self) -> None:
         """Log default value when not update."""

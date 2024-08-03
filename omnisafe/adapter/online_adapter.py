@@ -55,6 +55,9 @@ class OnlineAdapter:
         num_envs: int,
         seed: int,
         cfgs: Config,
+        risk_model: nn.Module = None, 
+        opt_risk = None,
+        criterion = None,
     ) -> None:
         """Initialize an instance of :class:`OnlineAdapter`."""
         assert env_id in support_envs(), f'Env {env_id} is not supported.'
@@ -67,6 +70,9 @@ class OnlineAdapter:
         self._num_envs = num_envs
         self._risk_bins = np.array([i*cfgs.risk_cfgs.quantile_size for i in range(cfgs.risk_cfgs.quantile_num)])
 
+        self.risk_model = risk_model
+        self.opt_risk = opt_risk
+        self.criterion = criterion
         self._wrapper(
             obs_normalize=cfgs.algo_cfgs.obs_normalize,
             reward_normalize=cfgs.algo_cfgs.reward_normalize,

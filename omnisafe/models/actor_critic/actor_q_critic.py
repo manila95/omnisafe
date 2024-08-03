@@ -65,6 +65,8 @@ class ActorQCritic(nn.Module):
         act_space: OmnisafeSpace,
         model_cfgs: ModelConfig,
         epochs: int,
+        use_risk=False,
+        risk_size=2,
     ) -> None:
         """Initialize an instance of :class:`ActorQCritic`."""
         super().__init__()
@@ -75,6 +77,8 @@ class ActorQCritic(nn.Module):
             hidden_sizes=model_cfgs.actor.hidden_sizes,
             activation=model_cfgs.actor.activation,
             weight_initialization_mode=model_cfgs.weight_initialization_mode,
+            use_risk=use_risk,
+            risk_size=risk_size,
         ).build_actor(
             actor_type=model_cfgs.actor_type,
         )
@@ -86,6 +90,8 @@ class ActorQCritic(nn.Module):
             weight_initialization_mode=model_cfgs.weight_initialization_mode,
             num_critics=model_cfgs.critic.num_critics,
             use_obs_encoder=False,
+            use_risk=use_risk,
+            risk_size=risk_size,
         ).build_critic(critic_type='q')
         self.target_reward_critic: Critic = deepcopy(self.reward_critic)
         for param in self.target_reward_critic.parameters():
@@ -125,7 +131,7 @@ class ActorQCritic(nn.Module):
                 verbose=True,
             )
 
-    def step(self, obs: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
+    def step(self, obs: torch.Tensor, risk: torch.Tensor = None, deterministic: bool = False) -> torch.Tensor:
         """Choose the action based on the observation. used in rollout without gradient.
 
         Args:
@@ -137,9 +143,9 @@ class ActorQCritic(nn.Module):
             Action with noise other wise.
         """
         with torch.no_grad():
-            return self.actor.predict(obs, deterministic=deterministic)
+            return self.actor.predict(obs, risk, deterministic=deterministic)
 
-    def forward(self, obs: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
+    def forward(self, obs: torch.Tensor, risk: torch.Tensor = None, deterministic: bool = False) -> torch.Tensor:
         """Choose the action based on the observation. used in training with gradient.
 
         Args:
@@ -150,7 +156,7 @@ class ActorQCritic(nn.Module):
             The deterministic action if deterministic is True.
             Action with noise other wise.
         """
-        return self.step(obs, deterministic=deterministic)
+        return self.step(obs, risk, deterministic=deterministic)
 
     def polyak_update(self, tau: float) -> None:
         """Update the target network with polyak averaging.

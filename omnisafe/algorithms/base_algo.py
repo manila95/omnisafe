@@ -48,14 +48,15 @@ class BaseAlgo(ABC):  # pylint: disable=too-few-public-methods
 
         self._init_env()
     
-        if cfgs.risk_cfgs.use_risk:
-            self._init_risk_model()
+        # if cfgs.risk_cfgs.use_risk:
+        #     self._init_risk_model()
 
-        if cfgs.risk_cfgs.fine_tune_risk and cfgs.risk_cfgs.use_risk:
-            self._init_risk_update()
+        # if cfgs.risk_cfgs.fine_tune_risk and cfgs.risk_cfgs.use_risk:
+        #     self._init_risk_update()
         
         self._init_model()
 
+        self.risk_size = self._cfgs.risk_cfgs.quantile_num
 
         self._init()
 
@@ -82,15 +83,6 @@ class BaseAlgo(ABC):  # pylint: disable=too-few-public-methods
     @abstractmethod
     def _init_model(self) -> None:
         """Initialize the model."""
-
-    @abstractmethod
-    def _init_risk_model(self) -> None:
-        """Initialize the risk model."""
-
-    @abstractmethod
-    def _init_risk_update(self) -> None:
-        """Initialize the risk model update."""
-
 
     @abstractmethod
     def _init_log(self) -> None:

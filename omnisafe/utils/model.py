@@ -82,6 +82,7 @@ class RiskNet(nn.Module):
         self.affine_risk = nn.Linear(risk_size, 12)
         self.activation = get_activation(activation)()
 
+        print("Risk Net called")
         sizes[1] += 12
         self.rest = build_mlp_network(sizes[1:], activation=activation, output_activation=output_activation,\
                                  weight_initialization_mode=weight_initialization_mode, use_risk=False, risk_size=risk_size)

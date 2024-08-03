@@ -82,7 +82,7 @@ class MLPActor(Actor):
             obs (torch.Tensor): Observation from environments.
             deterministic (bool, optional): Whether to use deterministic policy. Defaults to True.
         """
-        action = self.net(obs, risk) if self._use_risk else self.net(obs)
+        action = self.net(obs, risk) if risk is not None else self.net(obs)
         if deterministic:
             return action
         with torch.no_grad():

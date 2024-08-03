@@ -26,6 +26,8 @@ from omnisafe.common.logger import Logger
 from omnisafe.models.actor_critic.constraint_actor_q_critic import ConstraintActorQCritic
 from omnisafe.utils.config import Config
 
+from src.utils import *
+from src.models.risk_models import *
 
 class OffPolicyAdapter(OnlineAdapter):
     """OffPolicy Adapter for OmniSafe.
@@ -62,6 +64,50 @@ class OffPolicyAdapter(OnlineAdapter):
         self._current_obs, _ = self.reset()
         self._max_ep_len: int = 1000
         self._reset_log()
+        if self._cfgs.risk_cfgs.use_risk:
+            self.risk_size = self._cfgs.risk_cfgs.quantile_num
+            self._init_risk_model()
+
+            if self._cfgs.risk_cfgs.fine_tune_risk:
+                self._init_risk_update()
+                self.f_costs = None
+
+    def _init_risk_model(self) -> None:
+        """Initialize the risk model.
+
+        OmniSafe uses :class:`omnisafe.models.actor_critic.constraint_actor_critic.ConstraintActorCritic`
+        as the default model.
+
+        User can customize the model by inheriting this method.
+
+        Examples:
+            >>> def _init_model(self) -> None:
+            ...     self._actor_critic = CustomActorCritic()
+        """
+
+        risk_model_class = {"bayesian": {"continuous": BayesRiskEstCont, "binary": BayesRiskEst, "quantile": BayesRiskEst}, 
+                    "mlp": {"continuous": RiskEst, "binary": RiskEst}} 
+
+        self.risk_model = BayesRiskEst(obs_size=self._env.observation_space.shape[0], batch_norm=True, out_size=self.risk_size)
+        if os.path.exists(self._cfgs.risk_cfgs.risk_model_path):
+            self.risk_model.load_state_dict(torch.load(self._cfgs.risk_cfgs.risk_model_path, map_location=self._device))
+
+        self.risk_model.to(self._device)
+        self.risk_model.eval()
+
+
+    def _init_risk_update(self) -> None:
+
+        self.opt_risk = torch.optim.Adam(self.risk_model.parameters(), lr=self._cfgs.risk_cfgs.risk_lr, eps=1e-10)
+
+        self.risk_rb = ReplayBuffer()
+
+        if self._cfgs.risk_cfgs.risk_type == "quantile":
+            weight_tensor = torch.Tensor([1]*self._cfgs.risk_cfgs.quantile_num).to(self._device)
+            weight_tensor[0] = self._cfgs.risk_cfgs.risk_weight
+        elif self._cfgs.risk_cfgs.risk_type == "binary":
+            weight_tensor = torch.Tensor([1., self._cfgs.risk_cfgs.risk_weight]).to(self._device)
+        self.risk_criterion = nn.NLLLoss(weight=weight_tensor)
 
     def eval_policy(  # pylint: disable=too-many-locals
         self,
@@ -83,7 +129,9 @@ class OffPolicyAdapter(OnlineAdapter):
 
             done = False
             while not done:
-                act = agent.step(obs, deterministic=True)
+                risk = self.risk_model(obs) if self._cfgs.risk_cfgs.use_risk else None
+                print(obs)
+                act = agent.step(obs, risk,  deterministic=True)
                 obs, reward, cost, terminated, truncated, info = self._eval_env.step(act)
                 obs, reward, cost, terminated, truncated = (
                     torch.as_tensor(x, dtype=torch.float32, device=self._device)
@@ -124,14 +172,24 @@ class OffPolicyAdapter(OnlineAdapter):
             logger (Logger): Logger, to log ``EpRet``, ``EpCost``, ``EpLen``.
             use_rand_action (bool): Whether to use random action.
         """
-        for _ in range(rollout_step):
+
+        risk_bins = np.array([i*self._cfgs.risk_cfgs.quantile_size for i in range(self._cfgs.risk_cfgs.quantile_num+1)])
+
+        for step in range(rollout_step):
+            with torch.no_grad():
+                risk = None if not self._cfgs.risk_cfgs.use_risk else self.risk_model(self._current_obs)
+
             if use_rand_action:
                 act = torch.as_tensor(self._env.sample_action(), dtype=torch.float32).to(
                     self._device,
                 )
             else:
-                act = agent.step(self._current_obs, deterministic=False)
+                act = agent.step(self._current_obs, risk, deterministic=False)
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
+
+            if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+                self.f_costs = cost.unsqueeze(0) if self.f_costs is None else torch.cat([self.f_costs, cost.unsqueeze(0)], axis=0)
+
 
             self._log_value(reward=reward, cost=cost, info=info)
             real_next_obs = next_obs.clone()
@@ -150,6 +208,38 @@ class OffPolicyAdapter(OnlineAdapter):
                 done=torch.logical_and(terminated, torch.logical_xor(terminated, truncated)),
                 next_obs=real_next_obs,
             )
+
+            if "final_observation" in info:
+                if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+                    f_risks = torch.empty_like(self.f_costs)
+                    for i in range(self._cfgs.train_cfgs.vector_env_nums):
+                        f_risks[:, i] = compute_fear(self.f_costs[:, i])
+
+                    # f_risks = f_risks.view(-1, 1)
+                    
+                    f_risks_quant = torch.Tensor(np.apply_along_axis(lambda x: np.histogram(x, bins=risk_bins)[0], 1, np.expand_dims(f_risks.cpu().numpy(), 1)))
+                    buffer.store_risk(f_risks_quant)
+
+                self.f_costs = None
+
+            ## Risk model update 
+
+            if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+                if buffer.size > self._cfgs.risk_cfgs.risk_batch_size and step % self._cfgs.risk_cfgs.risk_update_period == 0:
+                    data = buffer.sample_batch(self._cfgs.risk_cfgs.risk_batch_size)
+                    pred = self.risk_model(data["next_obs"])
+                    risk_loss = self.risk_criterion(pred, torch.argmax(data["risk"].squeeze(), axis=1))
+                    self.opt_risk.zero_grad()
+                    risk_loss.backward()
+                    self.opt_risk.step()
+
+                    logger.store(
+                        {
+                           'Risk/risk_loss': risk_loss.item(),
+                        },
+                    )
+
+
 
             self._current_obs = next_obs
 

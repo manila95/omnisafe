@@ -63,6 +63,7 @@ class BaseBuffer(ABC):
 
     def __init__(
         self,
+        cfgs,
         obs_space: OmnisafeSpace,
         act_space: OmnisafeSpace,
         size: int,
@@ -79,11 +80,14 @@ class BaseBuffer(ABC):
         else:
             raise NotImplementedError
 
+        risk_buf = torch.zeros((size, cfgs.risk_cfgs.quantile_num), dtype=torch.float32, device=device)
+
         self.data: dict[str, torch.Tensor] = {
             'obs': obs_buf,
             'act': act_buf,
             'reward': torch.zeros(size, dtype=torch.float32, device=device),
             'cost': torch.zeros(size, dtype=torch.float32, device=device),
+            'risk': risk_buf,
             'done': torch.zeros(size, dtype=torch.float32, device=device),
         }
         self._size: int = size
