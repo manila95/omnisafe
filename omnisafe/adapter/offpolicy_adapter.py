@@ -186,7 +186,6 @@ class OffPolicyAdapter(OnlineAdapter):
             else:
                 act = agent.step(self._current_obs, risk, deterministic=False)
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
-
             if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
                 self.f_costs = cost.unsqueeze(0) if self.f_costs is None else torch.cat([self.f_costs, cost.unsqueeze(0)], axis=0)
 
@@ -216,8 +215,9 @@ class OffPolicyAdapter(OnlineAdapter):
                         f_risks[:, i] = compute_fear(self.f_costs[:, i])
 
                     # f_risks = f_risks.view(-1, 1)
-                    
-                    f_risks_quant = torch.Tensor(np.apply_along_axis(lambda x: np.histogram(x, bins=risk_bins)[0], 1, np.expand_dims(f_risks.cpu().numpy(), 1)))
+                    print(f_risks.size())
+                    f_risks_quant = torch.Tensor(np.apply_along_axis(lambda x: np.histogram(x, bins=risk_bins)[0], -1, np.expand_dims(f_risks.cpu().numpy(), -1)))
+                    print(f_risks_quant.size())
                     buffer.store_risk(f_risks_quant)
 
                 self.f_costs = None

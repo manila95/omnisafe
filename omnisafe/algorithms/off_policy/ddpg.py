@@ -453,10 +453,12 @@ class DDPG(BaseAlgo):
             next_obs (torch.Tensor): The ``next observation`` sampled from buffer.
         """
         with torch.no_grad():
-            next_action = self._actor_critic.actor.predict(next_obs, deterministic=True)
-            next_q_value_c = self._actor_critic.target_cost_critic(next_obs, next_action)[0]
+            next_risk = self._env.risk_model(next_obs) if self._cfgs.risk_cfgs.use_risk else None
+            risk = self._env.risk_model(obs) if self._cfgs.risk_cfgs.use_risk else None
+            next_action = self._actor_critic.actor.predict(next_obs, next_risk, deterministic=True)
+            next_q_value_c = self._actor_critic.target_cost_critic(next_obs, next_action, next_risk)[0]
             target_q_value_c = cost + self._cfgs.algo_cfgs.gamma * (1 - done) * next_q_value_c
-        q_value_c = self._actor_critic.cost_critic(obs, action)[0]
+        q_value_c = self._actor_critic.cost_critic(obs, action, risk)[0]
         loss = nn.functional.mse_loss(q_value_c, target_q_value_c)
 
         if self._cfgs.algo_cfgs.use_critic_norm:

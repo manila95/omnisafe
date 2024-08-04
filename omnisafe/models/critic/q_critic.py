@@ -136,9 +136,16 @@ class QCritic(Critic):
         """
         res = []
         for critic in self.net_lst:
-            if self._use_obs_encoder:
-                obs_encode = critic[0](obs, risk)
-                res.append(torch.squeeze(critic[1](torch.cat([obs_encode, act], dim=-1), risk), -1))
+            if risk is not None:
+                if self._use_obs_encoder:
+                    obs_encode = critic[0](obs, risk)
+                    res.append(torch.squeeze(critic[1](torch.cat([obs_encode, act], dim=-1), risk), -1))
+                else:
+                    res.append(torch.squeeze(critic(torch.cat([obs, act], dim=-1), risk), -1))
             else:
-                res.append(torch.squeeze(critic(torch.cat([obs, act], dim=-1), risk), -1))
+                if self._use_obs_encoder:
+                    obs_encode = critic[0](obs)
+                    res.append(torch.squeeze(critic[1](torch.cat([obs_encode, act], dim=-1)), -1))
+                else:
+                    res.append(torch.squeeze(critic(torch.cat([obs, act], dim=-1)), -1))               
         return res

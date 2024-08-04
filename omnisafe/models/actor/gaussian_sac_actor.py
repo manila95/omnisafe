@@ -55,7 +55,7 @@ class GaussianSACActor(Actor):
         risk_size: int = 2,
     ) -> None:
         """Initialize an instance of :class:`GaussianSACActor`."""
-        super().__init__(obs_space, act_space, hidden_sizes, activation, weight_initialization_mode)
+        super().__init__(obs_space, act_space, hidden_sizes, activation, weight_initialization_mode, use_risk, risk_size)
 
         self.net: nn.Module = build_mlp_network(
             sizes=[self._obs_dim, *self._hidden_sizes, self._act_dim * 2],
@@ -64,6 +64,7 @@ class GaussianSACActor(Actor):
             use_risk = use_risk,
             risk_size = risk_size,
         )
+        # self._use_risk = use_risk
 
         self._current_raw_action: torch.Tensor | None = None
         self.register_buffer('_log2', torch.log(torch.tensor(2.0)))

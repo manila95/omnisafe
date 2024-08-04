@@ -90,10 +90,12 @@ class DDPGPID(DDPG):
         Returns:
             The loss of pi/actor.
         """
-        action = self._actor_critic.actor.predict(obs, deterministic=True)
-        loss_r = -self._actor_critic.reward_critic(obs, action)[0]
+        with torch.no_grad():
+            risk = self._env.risk_model(obs) if self._cfgs.risk_cfgs.use_risk else None
+        action = self._actor_critic.actor.predict(obs, risk, deterministic=True)
+        loss_r = -self._actor_critic.reward_critic(obs, action, risk)[0]
         loss_c = (
-            self._lagrange.lagrangian_multiplier * self._actor_critic.cost_critic(obs, action)[0]
+            self._lagrange.lagrangian_multiplier * self._actor_critic.cost_critic(obs, action, risk)[0]
         )
         return (loss_r + loss_c).mean() / (1 + self._lagrange.lagrangian_multiplier)
 
