@@ -57,12 +57,14 @@ class AlgoWrapper:
         self,
         algo: str,
         env_id: str,
+        seed: int,
         train_terminal_cfgs: dict[str, Any] | None = None,
         custom_cfgs: dict[str, Any] | None = None,
     ) -> None:
         """Initialize an instance of :class:`AlgoWrapper`."""
         self.algo: str = algo
         self.env_id: str = env_id
+        self.seed: int = seed
         # algo_type will set in _init_checks()
         self.train_terminal_cfgs: dict[str, Any] | None = train_terminal_cfgs
         self.custom_cfgs: dict[str, Any] | None = custom_cfgs
@@ -99,7 +101,7 @@ class AlgoWrapper:
                 ), 'off-policy, model-based and offline only support parallel==1!'
 
         cfgs = get_default_kwargs_yaml(self.algo, self.env_id, self.algo_type)
-
+        cfgs.seed = self.seed
         # update the cfgs from custom configurations
         if self.custom_cfgs:
             # avoid repeatedly record the env_id and algo
