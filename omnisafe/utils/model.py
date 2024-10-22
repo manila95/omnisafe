@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 from torch import nn
+import torch
 
 from omnisafe.typing import Activation, InitFunction
 
@@ -70,11 +71,39 @@ def get_activation(
     return activations[activation]
 
 
+class RiskNet(nn.Module):
+    def __init__(self,
+                sizes: list[int],
+                activation: Activation,
+                risk_size: int = 10,
+                output_activation: Activation = 'identity',
+                weight_initialization_mode: InitFunction = 'kaiming_uniform',):
+        super().__init__()
+        self.affine_obs = nn.Linear(sizes[0], sizes[1])
+        self.affine_risk = nn.Linear(risk_size, 12)
+        self.activation = get_activation(activation)()
+    
+        sizes[1] += 12
+        self.rest = build_mlp_network(sizes[1:], activation=activation, output_activation=output_activation,\
+                                 weight_initialization_mode=weight_initialization_mode, use_risk=False, risk_size=risk_size)
+
+    def forward(self, x, risk):
+        # print(risk.size())
+        obs = self.activation(self.affine_obs(x))
+        risk = self.activation(self.affine_risk(risk))
+        x = torch.cat([obs, risk], axis=-1)
+        return self.rest(x)
+
+
+
+
 def build_mlp_network(
     sizes: list[int],
     activation: Activation,
     output_activation: Activation = 'identity',
     weight_initialization_mode: InitFunction = 'kaiming_uniform',
+    use_risk: bool = False, 
+    risk_size: int = 10,
 ) -> nn.Module:
     """Build the MLP network.
 
@@ -100,12 +129,15 @@ def build_mlp_network(
     Returns:
         The MLP network.
     """
-    activation_fn = get_activation(activation)
-    output_activation_fn = get_activation(output_activation)
-    layers = []
-    for j in range(len(sizes) - 1):
-        act_fn = activation_fn if j < len(sizes) - 2 else output_activation_fn
-        affine_layer = nn.Linear(sizes[j], sizes[j + 1])
-        initialize_layer(weight_initialization_mode, affine_layer)
-        layers += [affine_layer, act_fn()]
-    return nn.Sequential(*layers)
+    if use_risk:
+        return RiskNet(sizes, activation, risk_size, output_activation, weight_initialization_mode)
+    else:
+        activation_fn = get_activation(activation)
+        output_activation_fn = get_activation(output_activation)
+        layers = []
+        for j in range(len(sizes) - 1):
+            act_fn = activation_fn if j < len(sizes) - 2 else output_activation_fn
+            affine_layer = nn.Linear(sizes[j], sizes[j + 1])
+            initialize_layer(weight_initialization_mode, affine_layer)
+            layers += [affine_layer, act_fn()]
+        return nn.Sequential(*layers)

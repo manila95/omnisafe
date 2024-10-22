@@ -126,6 +126,23 @@ defaults:
       activation: tanh
       # learning rate
       lr: 0.001
+  risk_cfgs:
+    # use risk model or not ? 
+    use_risk: False
+    # do we have a pretrained risk model ? 
+    risk_model_path: None
+    # do we update the the risk model ? 
+    fine_tune_risk: False
+    # what should be the quantile size of the risk distribution?
+    quantile_size: 4
+    # what should be the number of samples for the risk model?
+    quantile_num: 10 
+    # learning rate
+    risk_lr: 0.0001
+    # batch size
+    risk_batch_size: 128
+    # frequency of updating the risk model
+    risk_update_freq: 100
 
 SafeMetaDrive:
   # training configurations

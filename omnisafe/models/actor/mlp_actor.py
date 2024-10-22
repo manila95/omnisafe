@@ -49,6 +49,8 @@ class MLPActor(Actor):
         activation: Activation = 'relu',
         output_activation: Activation = 'tanh',
         weight_initialization_mode: InitFunction = 'kaiming_uniform',
+        use_risk: bool = False,
+        risk_size: int = 10,
     ) -> None:
         """Initialize an instance of :class:`MLPActor`."""
         super().__init__(obs_space, act_space, hidden_sizes, activation, weight_initialization_mode)
@@ -58,12 +60,15 @@ class MLPActor(Actor):
             activation=activation,
             output_activation=output_activation,
             weight_initialization_mode=weight_initialization_mode,
+            use_risk=use_risk,
+            risk_size=risk_size,
         )
         self._noise: float = 0.1
 
     def predict(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor = None,
         deterministic: bool = True,
     ) -> torch.Tensor:
         """Predict the action given observation.
@@ -77,7 +82,7 @@ class MLPActor(Actor):
             obs (torch.Tensor): Observation from environments.
             deterministic (bool, optional): Whether to use deterministic policy. Defaults to True.
         """
-        action = self.net(obs)
+        action = self.net(obs, risk) if risk is not None else self.net(obs)
         if deterministic:
             return action
         with torch.no_grad():

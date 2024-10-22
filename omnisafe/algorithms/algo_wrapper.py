@@ -108,11 +108,11 @@ class AlgoWrapper:
             if 'algo' in self.custom_cfgs:
                 self.custom_cfgs.pop('algo')
             # validate the keys of custom configuration
-            recursive_check_config(self.custom_cfgs, cfgs)
+            recursive_check_config(self.custom_cfgs, cfgs.risk_cfgs)
             # update the cfgs from custom configurations
-            cfgs.recurisve_update(self.custom_cfgs)
+            cfgs.risk_cfgs.recurisve_update(self.custom_cfgs)
             # save configurations specified in current experiment
-            cfgs.update({'exp_increment_cfgs': self.custom_cfgs})
+            cfgs.risk_cfgs.update({'exp_increment_cfgs': self.custom_cfgs})
         # update the cfgs from custom terminal configurations
         if self.train_terminal_cfgs:
             # avoid repeatedly record the env_id and algo

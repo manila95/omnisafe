@@ -50,6 +50,8 @@ class GaussianLearningActor(GaussianActor):
         hidden_sizes: list[int],
         activation: Activation = 'relu',
         weight_initialization_mode: InitFunction = 'kaiming_uniform',
+        use_risk=False,
+        risk_size=2,
     ) -> None:
         """Initialize an instance of :class:`GaussianLearningActor`."""
         super().__init__(obs_space, act_space, hidden_sizes, activation, weight_initialization_mode)
@@ -58,10 +60,14 @@ class GaussianLearningActor(GaussianActor):
             sizes=[self._obs_dim, *self._hidden_sizes, self._act_dim],
             activation=activation,
             weight_initialization_mode=weight_initialization_mode,
+            use_risk=use_risk,
+            risk_size=risk_size,
         )
+        self._use_risk = use_risk
+        self._risk_size = risk_size
         self.log_std: nn.Parameter = nn.Parameter(torch.zeros(self._act_dim), requires_grad=True)
 
-    def _distribution(self, obs: torch.Tensor) -> Normal:
+    def _distribution(self, obs: torch.Tensor, risk: torch.Tensor = None) -> Normal:
         """Get the distribution of the actor.
 
         .. warning::
@@ -74,11 +80,11 @@ class GaussianLearningActor(GaussianActor):
         Returns:
             The normal distribution of the mean and standard deviation from the actor.
         """
-        mean = self.mean(obs)
+        mean = self.mean(obs, risk) if self._use_risk else self.mean(obs)
         std = torch.exp(self.log_std)
         return Normal(mean, std)
 
-    def predict(self, obs: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
+    def predict(self, obs: torch.Tensor, risk: torch.Tensor = None, deterministic: bool = False) -> torch.Tensor:
         """Predict the action given observation.
 
         The predicted action depends on the ``deterministic`` flag.
@@ -93,13 +99,13 @@ class GaussianLearningActor(GaussianActor):
         Returns:
             The mean of the distribution if deterministic is True, otherwise the sampled action.
         """
-        self._current_dist = self._distribution(obs)
+        self._current_dist = self._distribution(obs, risk)
         self._after_inference = True
         if deterministic:
             return self._current_dist.mean
         return self._current_dist.rsample()
 
-    def forward(self, obs: torch.Tensor) -> Distribution:
+    def forward(self, obs: torch.Tensor, risk:torch.Tensor = None) -> Distribution:
         """Forward method.
 
         Args:
@@ -108,7 +114,7 @@ class GaussianLearningActor(GaussianActor):
         Returns:
             The current distribution.
         """
-        self._current_dist = self._distribution(obs)
+        self._current_dist = self._distribution(obs, risk)
         self._after_inference = True
         return self._current_dist
 

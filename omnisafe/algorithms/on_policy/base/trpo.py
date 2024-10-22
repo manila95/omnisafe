@@ -59,6 +59,7 @@ class TRPO(NaturalPG):
         grads: torch.Tensor,
         p_dist: Distribution,
         obs: torch.Tensor,
+        risk: torch.Tensor,
         act: torch.Tensor,
         logp: torch.Tensor,
         adv: torch.Tensor,
@@ -106,9 +107,9 @@ class TRPO(NaturalPG):
             set_param_values_to_model(self._actor_critic.actor, new_theta)
 
             with torch.no_grad():
-                loss = self._loss_pi(obs, act, logp, adv)
+                loss = self._loss_pi(obs, risk, act, logp, adv)
                 # compute KL distance between new and old policy
-                q_dist = self._actor_critic.actor(obs)
+                q_dist = self._actor_critic.actor(obs, risk)
                 # KL-distance of old p-dist and new q-dist, applied in KLEarlyStopping
                 kl = torch.distributions.kl.kl_divergence(p_dist, q_dist).mean()
                 kl = distributed.dist_avg(kl).mean().item()
@@ -150,6 +151,7 @@ class TRPO(NaturalPG):
     def _update_actor(  # pylint: disable=too-many-arguments,too-many-locals
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
         act: torch.Tensor,
         logp: torch.Tensor,
         adv_r: torch.Tensor,
@@ -173,13 +175,15 @@ class TRPO(NaturalPG):
             adv_r (torch.Tensor): The reward advantage tensor.
             adv_c (torch.Tensor): The cost advantage tensor.
         """
+        risk = risk if self._cfgs.risk_cfgs.use_risk else None
         self._fvp_obs = obs[:: self._cfgs.algo_cfgs.fvp_sample_freq]
+        self._fvp_risk = risk[:: self._cfgs.algo_cfgs.fvp_sample_freq] if risk is not None else None
         theta_old = get_flat_params_from(self._actor_critic.actor)
         self._actor_critic.actor.zero_grad()
         adv = self._compute_adv_surrogate(adv_r, adv_c)
-        loss = self._loss_pi(obs, act, logp, adv)
+        loss = self._loss_pi(obs, risk, act, logp, adv)
         loss_before = distributed.dist_avg(loss)
-        p_dist = self._actor_critic.actor(obs)
+        p_dist = self._actor_critic.actor(obs, risk)
 
         loss.backward()
         distributed.avg_grads(self._actor_critic.actor)
@@ -198,6 +202,7 @@ class TRPO(NaturalPG):
             grads=grads,
             p_dist=p_dist,
             obs=obs,
+            risk=risk,
             act=act,
             logp=logp,
             adv=adv,
@@ -208,7 +213,7 @@ class TRPO(NaturalPG):
         set_param_values_to_model(self._actor_critic.actor, theta_new)
 
         with torch.no_grad():
-            loss = self._loss_pi(obs, act, logp, adv)
+            loss = self._loss_pi(obs, risk, act, logp, adv)
 
         self._logger.store(
             {

@@ -64,9 +64,11 @@ class ConstraintActorQCritic(ActorQCritic):
         act_space: OmnisafeSpace,
         model_cfgs: ModelConfig,
         epochs: int,
+        use_risk: bool = False,
+        risk_size: int = 10,
     ) -> None:
         """Initialize an instance of :class:`ConstraintActorQCritic`."""
-        super().__init__(obs_space, act_space, model_cfgs, epochs)
+        super().__init__(obs_space, act_space, model_cfgs, epochs, use_risk, risk_size)
 
         self.cost_critic: Critic = CriticBuilder(
             obs_space=obs_space,
@@ -76,6 +78,8 @@ class ConstraintActorQCritic(ActorQCritic):
             weight_initialization_mode=model_cfgs.weight_initialization_mode,
             num_critics=1,
             use_obs_encoder=False,
+            use_risk=use_risk,
+            risk_size=risk_size,
         ).build_critic('q')
         self.target_cost_critic: Critic = deepcopy(self.cost_critic)
         for param in self.target_cost_critic.parameters():

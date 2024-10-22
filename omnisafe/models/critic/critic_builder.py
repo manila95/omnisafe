@@ -55,6 +55,8 @@ class CriticBuilder:
         weight_initialization_mode: InitFunction = 'kaiming_uniform',
         num_critics: int = 1,
         use_obs_encoder: bool = False,
+        use_risk: bool = False,
+        risk_size: int = 10,
     ) -> None:
         """Initialize an instance of :class:`CriticBuilder`."""
         self._obs_space: OmnisafeSpace = obs_space
@@ -64,6 +66,8 @@ class CriticBuilder:
         self._hidden_sizes: list[int] = hidden_sizes
         self._num_critics: int = num_critics
         self._use_obs_encoder: bool = use_obs_encoder
+        self._use_risk = use_risk
+        self._risk_size = risk_size
 
     def build_critic(
         self,
@@ -92,6 +96,8 @@ class CriticBuilder:
                 weight_initialization_mode=self._weight_initialization_mode,
                 num_critics=self._num_critics,
                 use_obs_encoder=self._use_obs_encoder,
+                use_risk=self._use_risk,
+                risk_size=self._risk_size,
             )
         if critic_type == 'v':
             return VCritic(
@@ -101,6 +107,8 @@ class CriticBuilder:
                 activation=self._activation,
                 weight_initialization_mode=self._weight_initialization_mode,
                 num_critics=self._num_critics,
+                use_risk=self._use_risk,
+                risk_size=self._risk_size,
             )
 
         raise NotImplementedError(

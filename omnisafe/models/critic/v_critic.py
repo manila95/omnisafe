@@ -49,6 +49,8 @@ class VCritic(Critic):
         activation: Activation = 'relu',
         weight_initialization_mode: InitFunction = 'kaiming_uniform',
         num_critics: int = 1,
+        use_risk: bool = False,
+        risk_size: int = 10,
     ) -> None:
         """Initialize an instance of :class:`VCritic`."""
         super().__init__(
@@ -59,6 +61,8 @@ class VCritic(Critic):
             weight_initialization_mode,
             num_critics,
             use_obs_encoder=False,
+            use_risk=use_risk,
+            risk_size=risk_size,
         )
         self.net_lst: list[nn.Module]
         self.net_lst = []
@@ -68,6 +72,8 @@ class VCritic(Critic):
                 sizes=[self._obs_dim, *self._hidden_sizes, 1],
                 activation=self._activation,
                 weight_initialization_mode=self._weight_initialization_mode,
+                use_risk=use_risk,
+                risk_size=risk_size,
             )
             self.net_lst.append(net)
             self.add_module(f'critic_{idx}', net)
@@ -75,6 +81,7 @@ class VCritic(Critic):
     def forward(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor = None,
     ) -> list[torch.Tensor]:
         """Forward function.
 
@@ -88,5 +95,8 @@ class VCritic(Critic):
         """
         res = []
         for critic in self.net_lst:
-            res.append(torch.squeeze(critic(obs), -1))
+            if risk is None:
+                res.append(torch.squeeze(critic(obs), -1))
+            else:
+                res.append(torch.squeeze(critic(obs, risk), -1))
         return res

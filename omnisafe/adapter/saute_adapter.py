@@ -75,6 +75,7 @@ class SauteAdapter(OnPolicyAdapter):
             high=np.inf,
             shape=(self._env.observation_space.shape[0] + 1,),
         )
+        self.obs_size += 1
 
     @property
     def observation_space(self) -> Box:

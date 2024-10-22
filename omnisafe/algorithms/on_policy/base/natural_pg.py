@@ -89,9 +89,9 @@ class NaturalPG(PolicyGradient):
             The Fisher vector product.
         """
         self._actor_critic.actor.zero_grad()
-        q_dist = self._actor_critic.actor(self._fvp_obs)
+        q_dist = self._actor_critic.actor(self._fvp_obs, self._fvp_risk)
         with torch.no_grad():
-            p_dist = self._actor_critic.actor(self._fvp_obs)
+            p_dist = self._actor_critic.actor(self._fvp_obs, self._fvp_risk)
         kl = torch.distributions.kl.kl_divergence(p_dist, q_dist).mean()
 
         grads = torch.autograd.grad(
@@ -121,6 +121,7 @@ class NaturalPG(PolicyGradient):
     def _update_actor(  # pylint: disable=too-many-arguments,too-many-locals
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
         act: torch.Tensor,
         logp: torch.Tensor,
         adv_r: torch.Tensor,
@@ -147,11 +148,13 @@ class NaturalPG(PolicyGradient):
             AssertionError: If :math:`x H x` is not positive.
             AssertionError: If :math:`\alpha` is not finite.
         """
+        risk = risk if self._cfgs.risk_cfgs.use_risk else None
         self._fvp_obs = obs[:: self._cfgs.algo_cfgs.fvp_sample_freq]
+        self._fvp_risk = risk[:: self._cfgs.algo_cfgs.fvp_sample_freq] if self._cfgs.risk_cfgs.use_risk else None
         theta_old = get_flat_params_from(self._actor_critic.actor)
         self._actor_critic.actor.zero_grad()
         adv = self._compute_adv_surrogate(adv_r, adv_c)
-        loss = self._loss_pi(obs, act, logp, adv)
+        loss = self._loss_pi(obs, risk, act, logp, adv)
 
         loss.backward()
         distributed.avg_grads(self._actor_critic.actor)
@@ -169,7 +172,7 @@ class NaturalPG(PolicyGradient):
         set_param_values_to_model(self._actor_critic.actor, theta_new)
 
         with torch.no_grad():
-            loss = self._loss_pi(obs, act, logp, adv)
+            loss = self._loss_pi(obs, risk, act, logp, adv)
 
         self._logger.store(
             {
@@ -204,10 +207,13 @@ class NaturalPG(PolicyGradient):
             data['adv_r'],
             data['adv_c'],
         )
-        self._update_actor(obs, act, logp, adv_r, adv_c)
+        with torch.no_grad():
+            risk = self._env.risk_model(obs) if self._cfgs.risk_cfgs.use_risk else None
+        
+        self._update_actor(obs, risk, act, logp, adv_r, adv_c)
 
         dataloader = DataLoader(
-            dataset=TensorDataset(obs, target_value_r, target_value_c),
+            dataset=TensorDataset(obs, risk if risk is not None else obs, target_value_r, target_value_c),
             batch_size=self._cfgs.algo_cfgs.batch_size,
             shuffle=True,
         )
@@ -215,12 +221,13 @@ class NaturalPG(PolicyGradient):
         for _ in range(self._cfgs.algo_cfgs.update_iters):
             for (
                 obs,
+                risk,
                 target_value_r,
                 target_value_c,
             ) in dataloader:
-                self._update_reward_critic(obs, target_value_r)
+                self._update_reward_critic(obs, risk, target_value_r)
                 if self._cfgs.algo_cfgs.use_cost:
-                    self._update_cost_critic(obs, target_value_c)
+                    self._update_cost_critic(obs, risk, target_value_c)
 
         self._logger.store(
             {

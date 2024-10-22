@@ -63,6 +63,8 @@ class ActorCritic(nn.Module):
         act_space: OmnisafeSpace,
         model_cfgs: ModelConfig,
         epochs: int,
+        use_risk=False,
+        risk_size=10,
     ) -> None:
         """Initialize an instance of :class:`ActorCritic`."""
         super().__init__()
@@ -73,6 +75,8 @@ class ActorCritic(nn.Module):
             hidden_sizes=model_cfgs.actor.hidden_sizes,
             activation=model_cfgs.actor.activation,
             weight_initialization_mode=model_cfgs.weight_initialization_mode,
+            use_risk=use_risk, 
+            risk_size=risk_size,
         ).build_actor(
             actor_type=model_cfgs.actor_type,
         )
@@ -84,6 +88,8 @@ class ActorCritic(nn.Module):
             weight_initialization_mode=model_cfgs.weight_initialization_mode,
             num_critics=1,
             use_obs_encoder=False,
+            use_risk=use_risk,
+            risk_size=risk_size,
         ).build_critic(critic_type='v')
         self.add_module('actor', self.actor)
         self.add_module('reward_critic', self.reward_critic)
@@ -115,6 +121,7 @@ class ActorCritic(nn.Module):
     def step(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor = None,
         deterministic: bool = False,
     ) -> tuple[torch.Tensor, ...]:
         """Choose the action based on the observation. used in rollout without gradient.
@@ -130,14 +137,15 @@ class ActorCritic(nn.Module):
             log_prob: The log probability of the action.
         """
         with torch.no_grad():
-            value_r = self.reward_critic(obs)
-            act = self.actor.predict(obs, deterministic=deterministic)
+            value_r = self.reward_critic(obs, risk)
+            act = self.actor.predict(obs, risk, deterministic=deterministic)
             log_prob = self.actor.log_prob(act)
         return act, value_r[0], log_prob
 
     def forward(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor = None,
         deterministic: bool = False,
     ) -> tuple[torch.Tensor, ...]:
         """Choose the action based on the observation. used in training with gradient.
@@ -152,7 +160,7 @@ class ActorCritic(nn.Module):
             value_r: The reward value of the observation.
             log_prob: The log probability of the action.
         """
-        return self.step(obs, deterministic=deterministic)
+        return self.step(obs, risk, deterministic=deterministic)
 
     def set_annealing(self, epochs: list[int], std: list[float]) -> None:
         """Set the annealing mode for the actor.

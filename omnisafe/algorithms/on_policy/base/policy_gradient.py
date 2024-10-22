@@ -93,6 +93,8 @@ class PolicyGradient(BaseAlgo):
             act_space=self._env.action_space,
             model_cfgs=self._cfgs.model_cfgs,
             epochs=self._cfgs.train_cfgs.epochs,
+            use_risk=self._cfgs.risk_cfgs.use_risk,
+            risk_size=self._cfgs.risk_cfgs.quantile_num,
         ).to(self._device)
 
         if distributed.world_size() > 1:
@@ -224,6 +226,9 @@ class PolicyGradient(BaseAlgo):
             # log information about cost critic
             self._logger.register_key('Loss/Loss_cost_critic', delta=True)
             self._logger.register_key('Value/cost')
+        
+        if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+            self.logger.register_key('Loss/risk_loss', delta=True)
 
         self._logger.register_key('Time/Total')
         self._logger.register_key('Time/Rollout')
@@ -352,12 +357,14 @@ class PolicyGradient(BaseAlgo):
             data['adv_r'],
             data['adv_c'],
         )
+        with torch.no_grad():
+            risk = self._env.risk_model(obs) if self._cfgs.risk_cfgs.use_risk else None
 
         original_obs = obs
-        old_distribution = self._actor_critic.actor(obs)
+        old_distribution = self._actor_critic.actor(obs, risk)
 
         dataloader = DataLoader(
-            dataset=TensorDataset(obs, act, logp, target_value_r, target_value_c, adv_r, adv_c),
+            dataset=TensorDataset(obs, risk if self._cfgs.risk_cfgs.use_risk else obs, act, logp, target_value_r, target_value_c, adv_r, adv_c),
             batch_size=self._cfgs.algo_cfgs.batch_size,
             shuffle=True,
         )
@@ -368,6 +375,7 @@ class PolicyGradient(BaseAlgo):
         for i in track(range(self._cfgs.algo_cfgs.update_iters), description='Updating...'):
             for (
                 obs,
+                risk_b,
                 act,
                 logp,
                 target_value_r,
@@ -375,12 +383,12 @@ class PolicyGradient(BaseAlgo):
                 adv_r,
                 adv_c,
             ) in dataloader:
-                self._update_reward_critic(obs, target_value_r)
+                self._update_reward_critic(obs, risk_b, target_value_r)
                 if self._cfgs.algo_cfgs.use_cost:
-                    self._update_cost_critic(obs, target_value_c)
-                self._update_actor(obs, act, logp, adv_r, adv_c)
+                    self._update_cost_critic(obs, risk_b, target_value_c)
+                self._update_actor(obs, risk_b, act, logp, adv_r, adv_c)
 
-            new_distribution = self._actor_critic.actor(original_obs)
+            new_distribution = self._actor_critic.actor(original_obs, risk)
 
             kl = (
                 torch.distributions.kl.kl_divergence(old_distribution, new_distribution)
@@ -404,7 +412,7 @@ class PolicyGradient(BaseAlgo):
             },
         )
 
-    def _update_reward_critic(self, obs: torch.Tensor, target_value_r: torch.Tensor) -> None:
+    def _update_reward_critic(self, obs: torch.Tensor, risk:torch.Tensor, target_value_r: torch.Tensor) -> None:
         r"""Update value network under a double for loop.
 
         The loss function is ``MSE loss``, which is defined in ``torch.nn.MSELoss``.
@@ -425,8 +433,9 @@ class PolicyGradient(BaseAlgo):
             obs (torch.Tensor): The ``observation`` sampled from buffer.
             target_value_r (torch.Tensor): The ``target_value_r`` sampled from buffer.
         """
+        risk = risk if self._cfgs.risk_cfgs.use_risk else None
         self._actor_critic.reward_critic_optimizer.zero_grad()
-        loss = nn.functional.mse_loss(self._actor_critic.reward_critic(obs)[0], target_value_r)
+        loss = nn.functional.mse_loss(self._actor_critic.reward_critic(obs, risk)[0], target_value_r)
 
         if self._cfgs.algo_cfgs.use_critic_norm:
             for param in self._actor_critic.reward_critic.parameters():
@@ -444,7 +453,7 @@ class PolicyGradient(BaseAlgo):
 
         self._logger.store({'Loss/Loss_reward_critic': loss.mean().item()})
 
-    def _update_cost_critic(self, obs: torch.Tensor, target_value_c: torch.Tensor) -> None:
+    def _update_cost_critic(self, obs: torch.Tensor, risk:torch.Tensor, target_value_c: torch.Tensor) -> None:
         r"""Update value network under a double for loop.
 
         The loss function is ``MSE loss``, which is defined in ``torch.nn.MSELoss``.
@@ -465,8 +474,9 @@ class PolicyGradient(BaseAlgo):
             obs (torch.Tensor): The ``observation`` sampled from buffer.
             target_value_c (torch.Tensor): The ``target_value_c`` sampled from buffer.
         """
+        risk = risk if self._cfgs.risk_cfgs.use_risk else None
         self._actor_critic.cost_critic_optimizer.zero_grad()
-        loss = nn.functional.mse_loss(self._actor_critic.cost_critic(obs)[0], target_value_c)
+        loss = nn.functional.mse_loss(self._actor_critic.cost_critic(obs, risk)[0], target_value_c)
 
         if self._cfgs.algo_cfgs.use_critic_norm:
             for param in self._actor_critic.cost_critic.parameters():
@@ -487,6 +497,7 @@ class PolicyGradient(BaseAlgo):
     def _update_actor(  # pylint: disable=too-many-arguments
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
         act: torch.Tensor,
         logp: torch.Tensor,
         adv_r: torch.Tensor,
@@ -511,8 +522,9 @@ class PolicyGradient(BaseAlgo):
             adv_r (torch.Tensor): The ``reward_advantage`` sampled from buffer.
             adv_c (torch.Tensor): The ``cost_advantage`` sampled from buffer.
         """
+        risk = risk if self._cfgs.risk_cfgs.use_risk else None
         adv = self._compute_adv_surrogate(adv_r, adv_c)
-        loss = self._loss_pi(obs, act, logp, adv)
+        loss = self._loss_pi(obs, risk, act, logp, adv)
         self._actor_critic.actor_optimizer.zero_grad()
         loss.backward()
         if self._cfgs.algo_cfgs.use_max_grad_norm:
@@ -544,6 +556,7 @@ class PolicyGradient(BaseAlgo):
     def _loss_pi(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
         act: torch.Tensor,
         logp: torch.Tensor,
         adv: torch.Tensor,
@@ -571,7 +584,7 @@ class PolicyGradient(BaseAlgo):
         Returns:
             The loss of pi/actor.
         """
-        distribution = self._actor_critic.actor(obs)
+        distribution = self._actor_critic.actor(obs, risk)
         logp_ = self._actor_critic.actor.log_prob(act)
         std = self._actor_critic.actor.std
         ratio = torch.exp(logp_ - logp)

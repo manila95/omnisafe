@@ -60,9 +60,11 @@ class ConstraintActorCritic(ActorCritic):
         act_space: OmnisafeSpace,
         model_cfgs: ModelConfig,
         epochs: int,
+        use_risk: bool = False,
+        risk_size: int = 10,
     ) -> None:
         """Initialize an instance of :class:`ConstraintActorCritic`."""
-        super().__init__(obs_space, act_space, model_cfgs, epochs)
+        super().__init__(obs_space, act_space, model_cfgs, epochs, use_risk, risk_size)
         self.cost_critic: Critic = CriticBuilder(
             obs_space=obs_space,
             act_space=act_space,
@@ -71,6 +73,8 @@ class ConstraintActorCritic(ActorCritic):
             weight_initialization_mode=model_cfgs.weight_initialization_mode,
             num_critics=1,
             use_obs_encoder=False,
+            use_risk=use_risk,
+            risk_size=risk_size,
         ).build_critic('v')
         self.add_module('cost_critic', self.cost_critic)
 
@@ -84,6 +88,7 @@ class ConstraintActorCritic(ActorCritic):
     def step(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor = None,
         deterministic: bool = False,
     ) -> tuple[torch.Tensor, ...]:
         """Choose action based on observation.
@@ -100,10 +105,10 @@ class ConstraintActorCritic(ActorCritic):
             log_prob: The log probability of the action.
         """
         with torch.no_grad():
-            value_r = self.reward_critic(obs)
-            value_c = self.cost_critic(obs)
+            value_r = self.reward_critic(obs, risk)
+            value_c = self.cost_critic(obs, risk)
 
-            action = self.actor.predict(obs, deterministic=deterministic)
+            action = self.actor.predict(obs, risk, deterministic=deterministic)
             log_prob = self.actor.log_prob(action)
 
         return action, value_r[0], value_c[0], log_prob
@@ -111,6 +116,7 @@ class ConstraintActorCritic(ActorCritic):
     def forward(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
         deterministic: bool = False,
     ) -> tuple[torch.Tensor, ...]:
         """Choose action based on observation.
@@ -126,4 +132,4 @@ class ConstraintActorCritic(ActorCritic):
             value_c: The cost value of the observation.
             log_prob: The log probability of the action.
         """
-        return self.step(obs, deterministic=deterministic)
+        return self.step(obs, risk, deterministic=deterministic)

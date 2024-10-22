@@ -69,6 +69,8 @@ class QCritic(Critic):
         weight_initialization_mode: InitFunction = 'kaiming_uniform',
         num_critics: int = 1,
         use_obs_encoder: bool = False,
+        use_risk: bool = False,
+        risk_size: int = 10,
     ) -> None:
         """Initialize an instance of :class:`QCritic`."""
         super().__init__(
@@ -79,6 +81,8 @@ class QCritic(Critic):
             weight_initialization_mode,
             num_critics,
             use_obs_encoder,
+            use_risk,
+            risk_size,
         )
         self.net_lst: list[nn.Sequential] = []
         for idx in range(self._num_critics):
@@ -88,11 +92,15 @@ class QCritic(Critic):
                     activation=activation,
                     output_activation=activation,
                     weight_initialization_mode=weight_initialization_mode,
+                    use_risk=use_risk,
+                    risk_size=risk_size,
                 )
                 net = build_mlp_network(
                     [hidden_sizes[0] + self._act_dim] + hidden_sizes[1:] + [1],
                     activation=activation,
                     weight_initialization_mode=weight_initialization_mode,
+                    use_risk=use_risk,
+                    risk_size=risk_size,
                 )
                 critic = nn.Sequential(obs_encoder, net)
             else:
@@ -100,6 +108,8 @@ class QCritic(Critic):
                     [self._obs_dim + self._act_dim, *hidden_sizes, 1],
                     activation=activation,
                     weight_initialization_mode=weight_initialization_mode,
+                    use_risk=use_risk,
+                    risk_size=risk_size
                 )
                 critic = nn.Sequential(net)
             self.net_lst.append(critic)
@@ -109,6 +119,7 @@ class QCritic(Critic):
         self,
         obs: torch.Tensor,
         act: torch.Tensor,
+        risk: torch.Tensor = None,
     ) -> list[torch.Tensor]:
         """Forward function.
 
@@ -127,7 +138,7 @@ class QCritic(Critic):
         for critic in self.net_lst:
             if self._use_obs_encoder:
                 obs_encode = critic[0](obs)
-                res.append(torch.squeeze(critic[1](torch.cat([obs_encode, act], dim=-1)), -1))
+                res.append(torch.squeeze(critic[1](torch.cat([obs_encode, act], dim=-1), risk), -1))
             else:
-                res.append(torch.squeeze(critic(torch.cat([obs, act], dim=-1)), -1))
+                res.append(torch.squeeze(critic(torch.cat([obs, act], dim=-1), risk), -1))
         return res
