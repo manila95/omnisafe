@@ -83,7 +83,7 @@ defaults:
     # The sub-sampling rate of the observation
     fvp_sample_freq: 1
     # The safety budget, equal to the cost limit
-    safety_budget: 25.0
+    safety_budget: 10.0
     # The saute gamma
     saute_gamma: 0.999
     # The max length of the episode
@@ -93,9 +93,9 @@ defaults:
   # logger configurations
   logger_cfgs:
     # use wandb for logging
-    use_wandb: False
+    use_wandb: True
     # wandb project name
-    wandb_project: omnisafe
+    wandb_project: risk_aware_exploration
     # use tensorboard for logging
     use_tensorboard: True
     # save model frequency
