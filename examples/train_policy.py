@@ -80,6 +80,8 @@ if __name__ == '__main__':
         help='seed for random number generator',
     )
     args, unparsed_args = parser.parse_known_args()
+    unparsed_args = [x.replace("=", " ") for x in unparsed_args]
+    unparsed_args = [y for x in unparsed_args for y in x.split()]
     keys = [k[2:] for k in unparsed_args[0::2]]
     values = list(unparsed_args[1::2])
     unparsed_args = dict(zip(keys, values))
@@ -88,7 +90,7 @@ if __name__ == '__main__':
     opt = vars(args)
     # Removing the seed argument to avoid anything from breaking
     del opt["seed"]
-
+    
     custom_cfgs = {}
     for k, v in unparsed_args.items():
         update_dict(custom_cfgs, custom_cfgs_to_dict(k, v))
