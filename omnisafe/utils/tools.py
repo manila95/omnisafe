@@ -175,6 +175,8 @@ def custom_cfgs_to_dict(key_list: str, value: Any) -> dict[str, Any]:
         value = False
     elif '.' in value:
         value = float(value)
+    elif 'e-' in value:
+        value = float(value)
     elif value.isdigit():
         value = int(value)
     elif value.startswith('[') and value.endswith(']'):
