@@ -69,7 +69,7 @@ defaults:
     # clip ratio
     clip: 0.2
     # cost limit
-    cost_limit: 25.0
+    cost_limit: 10.0
     # advantage estimation method, options: gae, retrace
     adv_estimation_method: gae
     # standardize reward advantage

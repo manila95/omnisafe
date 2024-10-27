@@ -48,6 +48,7 @@ class P3O(PPO):
     def _loss_pi_cost(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
         act: torch.Tensor,
         logp: torch.Tensor,
         adv_c: torch.Tensor,
@@ -74,7 +75,7 @@ class P3O(PPO):
         Returns:
             The loss of the cost performance.
         """
-        self._actor_critic.actor(obs)
+        self._actor_critic.actor(obs, risk)
         logp_ = self._actor_critic.actor.log_prob(act)
         ratio = torch.exp(logp_ - logp)
         surr_cadv = (ratio * adv_c).mean()
@@ -86,6 +87,7 @@ class P3O(PPO):
     def _update_actor(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
         act: torch.Tensor,
         logp: torch.Tensor,
         adv_r: torch.Tensor,
@@ -116,8 +118,8 @@ class P3O(PPO):
             adv_r (torch.Tensor): ``reward_advantage`` stored in buffer.
             adv_c (torch.Tensor): ``cost_advantage`` stored in buffer.
         """
-        loss_reward = self._loss_pi(obs, act, logp, adv_r)
-        loss_cost = self._loss_pi_cost(obs, act, logp, adv_c)
+        loss_reward = self._loss_pi(obs, risk, act, logp, adv_r)
+        loss_cost = self._loss_pi_cost(obs, risk, act, logp, adv_c)
 
         loss = loss_reward + loss_cost
 

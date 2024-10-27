@@ -35,6 +35,7 @@ class PPO(PolicyGradient):
     def _loss_pi(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
         act: torch.Tensor,
         logp: torch.Tensor,
         adv: torch.Tensor,
@@ -63,7 +64,8 @@ class PPO(PolicyGradient):
         Returns:
             The loss of pi/actor.
         """
-        distribution = self._actor_critic.actor(obs)
+        risk = risk if self._cfgs.risk_cfgs.use_risk else None
+        distribution = self._actor_critic.actor(obs, risk)
         logp_ = self._actor_critic.actor.log_prob(act)
         std = self._actor_critic.actor.std
         ratio = torch.exp(logp_ - logp)
