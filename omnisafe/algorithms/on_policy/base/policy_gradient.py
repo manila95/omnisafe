@@ -195,6 +195,12 @@ class PolicyGradient(BaseAlgo):
             window_length=self._cfgs.logger_cfgs.window_lens,
         )
         self._logger.register_key(
+            'Metrics/TotalCost',
+        )
+        self._logger.register_key(
+            'Metrics/TotalTotalCost',
+        )
+        self._logger.register_key(
             'Metrics/EpCost',
             window_length=self._cfgs.logger_cfgs.window_lens,
         )

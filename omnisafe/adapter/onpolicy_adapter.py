@@ -58,6 +58,8 @@ class OnPolicyAdapter(OnlineAdapter):
         self._reset_log()
 
         self._num_envs = num_envs
+        self.total_cost = 0
+        self.total_total_cost = 0
     
         if self._cfgs.risk_cfgs.use_risk:
             self.obs_size = self._env.observation_space.shape[0]
@@ -109,6 +111,7 @@ class OnPolicyAdapter(OnlineAdapter):
 
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
 
+            self.total_total_cost += torch.sum(cost.int()).item()
             if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
                 f_next_obs = next_obs.unsqueeze(0) if f_next_obs is None else torch.concat([f_next_obs, next_obs.unsqueeze(0)], axis=0)
                 f_costs = cost.unsqueeze(0) if f_costs is None else torch.concat([f_costs, cost.unsqueeze(0)], axis=0)
@@ -225,11 +228,14 @@ class OnPolicyAdapter(OnlineAdapter):
         """
         if hasattr(self._env, 'spec_log'):
             self._env.spec_log(logger)
+        self.total_cost += self._ep_cost[idx]
         logger.store(
             {
                 'Metrics/EpRet': self._ep_ret[idx],
                 'Metrics/EpCost': self._ep_cost[idx],
                 'Metrics/EpLen': self._ep_len[idx],
+                'Metrics/TotalCost': self.total_cost,
+                'Metrics/TotalTotalCost': self.total_total_cost,
             },
         )
 
