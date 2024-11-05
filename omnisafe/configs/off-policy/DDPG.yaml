@@ -33,6 +33,8 @@ defaults:
     total_steps: 1000000
     # number of evaluate episodes
     eval_episodes: 1
+    # number of steps to update the policy
+    steps_per_epoch: 2000
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy

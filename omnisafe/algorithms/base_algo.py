@@ -42,6 +42,7 @@ class BaseAlgo(ABC):  # pylint: disable=too-few-public-methods
 
         assert hasattr(cfgs.train_cfgs, 'device'), 'Please specify the device in the config file.'
         self._device: torch.device = get_device(self._cfgs.train_cfgs.device)
+        self._cfgs.algo_cfgs.steps_per_epoch = self._cfgs.train_cfgs.steps_per_epoch
 
         distributed.setup_distributed()
 

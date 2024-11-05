@@ -90,6 +90,8 @@ class DDPG(BaseAlgo):
         ), 'The number of steps per epoch is not divisible by the number of steps per sample.'
         self._samples_per_epoch: int = self._steps_per_epoch // self._update_cycle
         self._update_count: int = 0
+        self._cfgs.algo_cfgs.steps_per_epoch = self._cfgs.train_cfgs.steps_per_epoch
+        # print(self._cfgs.algo_cfgs.steps_per_epoch)
 
     def _init_model(self) -> None:
         """Initialize the model.

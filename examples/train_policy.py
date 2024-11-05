@@ -100,6 +100,13 @@ if __name__ == '__main__':
         metavar='EVAL EPISODES',
         help='how frequently to evaluate the policy (0 means no evaluation only on training environment)',
     )
+    parser.add_argument(
+        '--steps-per-epoch',
+        type=int,
+        default=2000,
+        metavar='STEPS PER EPOCH',
+        help='how many steps to execute in each epoch',
+    )
     args, unparsed_args = parser.parse_known_args()
     unparsed_args = [x.replace("=", " ") for x in unparsed_args]
     unparsed_args = [y for x in unparsed_args for y in x.split()]
