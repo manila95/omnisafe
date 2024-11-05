@@ -573,7 +573,7 @@ class DDPG(BaseAlgo):
             {
                 'Loss/Loss_reward_critic': 0.0,
                 'Loss/Loss_pi': 0.0,
-                'Loss/risk_loss': 0.0,
+                # 'Loss/risk_loss': 0.0,
                 'Value/reward_critic': 0.0,
             },
         )
@@ -581,7 +581,7 @@ class DDPG(BaseAlgo):
             self._logger.store(
                 {
                     'Loss/Loss_cost_critic': 0.0,
-                    'Loss/risk_loss': 0.0,
+                    # 'Loss/risk_loss': 0.0,
                     'Value/cost_critic': 0.0,
                 },
             )
