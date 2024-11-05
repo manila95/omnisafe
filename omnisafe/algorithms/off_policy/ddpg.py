@@ -109,6 +109,8 @@ class DDPG(BaseAlgo):
             act_space=self._env.action_space,
             model_cfgs=self._cfgs.model_cfgs,
             epochs=self._epochs,
+            use_risk=self._cfgs.risk_cfgs.use_risk,
+            risk_size=self._cfgs.risk_cfgs.quantile_num,
         ).to(self._device)
 
     def _init(self) -> None:
@@ -209,7 +211,12 @@ class DDPG(BaseAlgo):
             'Metrics/EpLen',
             window_length=self._cfgs.logger_cfgs.window_lens,
         )
-
+        self._logger.register_key(
+            'Metrics/TotalCost',
+        )
+        self._logger.register_key(
+            'Metrics/TotalTotalCost',
+        )
         if self._cfgs.train_cfgs.eval_episodes > 0:
             self._logger.register_key(
                 'Metrics/TestEpRet',
@@ -231,7 +238,8 @@ class DDPG(BaseAlgo):
 
         # log information about actor
         self._logger.register_key('Loss/Loss_pi', delta=True)
-
+        if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+            self.logger.register_key('Loss/risk_loss', delta=True)
         # log information about critic
         self._logger.register_key('Loss/Loss_reward_critic', delta=True)
         self._logger.register_key('Value/reward_critic')
@@ -278,6 +286,10 @@ class DDPG(BaseAlgo):
                 epoch * self._samples_per_epoch,
                 (epoch + 1) * self._samples_per_epoch,
             ):
+                
+                if self._cfgs.train_cfgs.use_resets and self._env.total_step % self._cfgs.train_cfgs.reset_freq == 0:
+                    self._init_model()
+                
                 step = sample_step * self._update_cycle * self._cfgs.train_cfgs.vector_env_nums
 
                 rollout_start = time.time()
@@ -390,22 +402,27 @@ class DDPG(BaseAlgo):
                 data['done'],
                 data['next_obs'],
             )
+            with torch.no_grad():
+                risk = self._env.risk_model(obs) if self._cfgs.risk_cfgs.use_risk else None
+                next_risk = self._env.risk_model(next_obs) if self._cfgs.risk_cfgs.use_risk else None
 
-            self._update_reward_critic(obs, act, reward, done, next_obs)
+            self._update_reward_critic(obs, risk, act, reward, done, next_obs, next_risk)
             if self._cfgs.algo_cfgs.use_cost:
-                self._update_cost_critic(obs, act, cost, done, next_obs)
+                self._update_cost_critic(obs, risk, act, cost, done, next_obs, next_risk)
 
             if self._update_count % self._cfgs.algo_cfgs.policy_delay == 0:
-                self._update_actor(obs)
+                self._update_actor(obs, risk)
                 self._actor_critic.polyak_update(self._cfgs.algo_cfgs.polyak)
 
     def _update_reward_critic(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
         action: torch.Tensor,
         reward: torch.Tensor,
         done: torch.Tensor,
         next_obs: torch.Tensor,
+        next_risk: torch.Tensor,
     ) -> None:
         """Update reward critic.
 
@@ -421,10 +438,10 @@ class DDPG(BaseAlgo):
             next_obs (torch.Tensor): The ``next observation`` sampled from buffer.
         """
         with torch.no_grad():
-            next_action = self._actor_critic.actor.predict(next_obs, deterministic=True)
-            next_q_value_r = self._actor_critic.target_reward_critic(next_obs, next_action)[0]
+            next_action = self._actor_critic.actor.predict(next_obs, next_risk, deterministic=True)
+            next_q_value_r = self._actor_critic.target_reward_critic(next_obs, next_action, next_risk)[0]
             target_q_value_r = reward + self._cfgs.algo_cfgs.gamma * (1 - done) * next_q_value_r
-        q_value_r = self._actor_critic.reward_critic(obs, action)[0]
+        q_value_r = self._actor_critic.reward_critic(obs, action, risk)[0]
         loss = nn.functional.mse_loss(q_value_r, target_q_value_r)
 
         if self._cfgs.algo_cfgs.use_critic_norm:
@@ -449,10 +466,12 @@ class DDPG(BaseAlgo):
     def _update_cost_critic(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
         action: torch.Tensor,
         cost: torch.Tensor,
         done: torch.Tensor,
         next_obs: torch.Tensor,
+        next_risk: torch.Tensor,
     ) -> None:
         """Update cost critic.
 
@@ -468,10 +487,10 @@ class DDPG(BaseAlgo):
             next_obs (torch.Tensor): The ``next observation`` sampled from buffer.
         """
         with torch.no_grad():
-            next_action = self._actor_critic.actor.predict(next_obs, deterministic=True)
-            next_q_value_c = self._actor_critic.target_cost_critic(next_obs, next_action)[0]
+            next_action = self._actor_critic.actor.predict(next_obs, next_risk, deterministic=True)
+            next_q_value_c = self._actor_critic.target_cost_critic(next_obs, next_action, next_risk)[0]
             target_q_value_c = cost + self._cfgs.algo_cfgs.gamma * (1 - done) * next_q_value_c
-        q_value_c = self._actor_critic.cost_critic(obs, action)[0]
+        q_value_c = self._actor_critic.cost_critic(obs, action, risk)[0]
         loss = nn.functional.mse_loss(q_value_c, target_q_value_c)
 
         if self._cfgs.algo_cfgs.use_critic_norm:
@@ -498,6 +517,7 @@ class DDPG(BaseAlgo):
     def _update_actor(  # pylint: disable=too-many-arguments
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
     ) -> None:
         """Update actor.
 
@@ -508,7 +528,7 @@ class DDPG(BaseAlgo):
         Args:
             obs (torch.Tensor): The ``observation`` sampled from buffer.
         """
-        loss = self._loss_pi(obs)
+        loss = self._loss_pi(obs, risk)
         self._actor_critic.actor_optimizer.zero_grad()
         loss.backward()
         if self._cfgs.algo_cfgs.max_grad_norm:
@@ -526,6 +546,7 @@ class DDPG(BaseAlgo):
     def _loss_pi(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
     ) -> torch.Tensor:
         r"""Computing ``pi/actor`` loss.
 
@@ -543,8 +564,8 @@ class DDPG(BaseAlgo):
         Returns:
             The loss of pi/actor.
         """
-        action = self._actor_critic.actor.predict(obs, deterministic=True)
-        return -self._actor_critic.reward_critic(obs, action)[0].mean()
+        action = self._actor_critic.actor.predict(obs, risk, deterministic=True)
+        return -self._actor_critic.reward_critic(obs, action, risk)[0].mean()
 
     def _log_when_not_update(self) -> None:
         """Log default value when not update."""
@@ -552,6 +573,7 @@ class DDPG(BaseAlgo):
             {
                 'Loss/Loss_reward_critic': 0.0,
                 'Loss/Loss_pi': 0.0,
+                'Loss/risk_loss': 0.0,
                 'Value/reward_critic': 0.0,
             },
         )
@@ -559,6 +581,7 @@ class DDPG(BaseAlgo):
             self._logger.store(
                 {
                     'Loss/Loss_cost_critic': 0.0,
+                    'Loss/risk_loss': 0.0,
                     'Value/cost_critic': 0.0,
                 },
             )

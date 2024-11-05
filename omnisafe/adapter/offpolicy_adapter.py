@@ -62,6 +62,11 @@ class OffPolicyAdapter(OnlineAdapter):
         self._current_obs, _ = self.reset()
         self._max_ep_len: int = 1000
         self._reset_log()
+        self.total_total_cost = 0
+        self.total_cost = 0
+        self.total_step = 0
+        self._num_envs = num_envs
+
 
     def eval_policy(  # pylint: disable=too-many-locals
         self,
@@ -125,6 +130,7 @@ class OffPolicyAdapter(OnlineAdapter):
             logger (Logger): Logger, to log ``EpRet``, ``EpCost``, ``EpLen``.
             use_rand_action (bool): Whether to use random action.
         """
+        
         for _ in range(rollout_step):
             if use_rand_action:
                 act = (torch.rand(self.action_space.shape) * 2 - 1).unsqueeze(0).to(self._device)  # type: ignore
@@ -132,12 +138,22 @@ class OffPolicyAdapter(OnlineAdapter):
                 act = agent.step(self._current_obs, deterministic=False)
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
 
+            self.total_total_cost += torch.sum(cost.int()).item()
+
+            if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+                self._store_risk_data(next_obs, cost)
             self._log_value(reward=reward, cost=cost, info=info)
             real_next_obs = next_obs.clone()
+
+            if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+                self._update_risk(self.total_step, logger)
+
             for idx, done in enumerate(torch.logical_or(terminated, truncated)):
                 if done:
                     if 'final_observation' in info:
                         real_next_obs[idx] = info['final_observation'][idx]
+                    if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+                        self._populate_risk_rb()
                     self._log_metrics(logger, idx)
                     self._reset_log(idx)
 
@@ -151,6 +167,7 @@ class OffPolicyAdapter(OnlineAdapter):
             )
 
             self._current_obs = next_obs
+            self.total_step += 1
 
     def _log_value(
         self,
@@ -182,11 +199,14 @@ class OffPolicyAdapter(OnlineAdapter):
         """
         if hasattr(self._env, 'spec_log'):
             self._env.spec_log(logger)
+        self.total_cost += self._ep_cost[idx]
         logger.store(
             {
                 'Metrics/EpRet': self._ep_ret[idx],
                 'Metrics/EpCost': self._ep_cost[idx],
                 'Metrics/EpLen': self._ep_len[idx],
+                'Metrics/TotalCost': self.total_cost,
+                'Metrics/TotalTotalCost': self.total_total_cost,
             },
         )
 

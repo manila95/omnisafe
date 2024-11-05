@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from typing import Any
-
+import os
 import torch
 
 from omnisafe.envs.core import CMDP, make, support_envs
@@ -32,8 +32,11 @@ from omnisafe.envs.wrapper import (
 )
 from omnisafe.typing import OmnisafeSpace
 from omnisafe.utils.config import Config
-from omnisafe.utils.tools import get_device
+from omnisafe.common.logger import Logger
 
+from omnisafe.utils.tools import get_device
+from src.utils import *
+from src.models.risk_models import *
 
 class OnlineAdapter:
     """Online Adapter for OmniSafe.
@@ -81,6 +84,56 @@ class OnlineAdapter:
             self._wrapper_eval(obs_normalize=cfgs.algo_cfgs.obs_normalize)
 
         self._env.set_seed(seed)
+
+        if self._cfgs.risk_cfgs.use_risk:
+            # Creating variables for storing data for the risk model (episodic)
+            self.f_next_obs, self.f_costs = None, None 
+
+            self.obs_size = self._env.observation_space.shape[0]
+            self.risk_model = BayesRiskEst(self.obs_size, out_size=self._cfgs.risk_cfgs.quantile_num)
+
+            if os.path.exists(self._cfgs.risk_cfgs.risk_model_path):
+                self.risk_model.load_state_dict(torch.load(self._cfgs.risk_cfgs.risk_model_path))
+            
+            if self._cfgs.risk_cfgs.fine_tune_risk:
+                self.risk_rb = ReplayBuffer()
+                self.risk_optim = torch.optim.Adam(self.risk_model.parameters(), lr=self._cfgs.risk_cfgs.risk_lr)
+                self.risk_bins =  np.array([i*self._cfgs.risk_cfgs.quantile_size for i in range(self._cfgs.risk_cfgs.quantile_num+1)])
+                self.risk_criterion = torch.nn.NLLLoss()
+            self.risk_model.eval()
+
+
+    def _store_risk_data(self, next_obs, costs):
+        self.f_next_obs = next_obs.unsqueeze(0) if self.f_next_obs is None else torch.concat([self.f_next_obs, next_obs.unsqueeze(0)], axis=0)
+        self.f_costs = costs.unsqueeze(0) if self.f_costs is None else torch.concat([self.f_costs, costs.unsqueeze(0)], axis=0)
+
+
+    def _update_risk(self, step, logger: Logger):
+        ## Updating the risk model 
+        if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
+            self.risk_model.train()
+            if len(self.risk_rb) > self._cfgs.risk_cfgs.risk_batch_size and step % self._cfgs.risk_cfgs.risk_update_freq == 0:
+                risk_data = self.risk_rb.sample(self._cfgs.risk_cfgs.risk_batch_size)
+                pred = self.risk_model(risk_data["next_obs"].to(self._device))
+                risk_loss = self.risk_criterion(pred, torch.argmax(risk_data["risks"].squeeze(), axis=1).to(self._device))
+                self.risk_optim.zero_grad()
+                risk_loss.backward()
+                self.risk_optim.step()
+                logger.store({'Loss/risk_loss': risk_loss})
+            self.risk_model.eval()
+
+
+    def _populate_risk_rb(self):
+        f_risks = torch.empty_like(self.f_costs)
+        for i in range(self._num_envs):
+            f_risks[:, i] = compute_fear(self.f_costs[:, i])
+        
+        e_risks = f_risks.view(-1, 1).cpu().numpy()
+        e_risks_quant = torch.Tensor(np.apply_along_axis(lambda x: np.histogram(x, bins=self.risk_bins)[0], 1, np.expand_dims(e_risks, 1))).to(self._device)
+        self.risk_rb.add(None, self.f_next_obs.view(-1, self.obs_size), None, None, None, None, e_risks_quant, f_risks.view(-1, 1))
+
+        self.f_next_obs, self.f_costs = None, None
+
 
     def _wrapper(
         self,

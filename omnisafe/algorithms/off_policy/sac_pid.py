@@ -72,6 +72,7 @@ class SACPID(SAC):
     def _loss_pi(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
     ) -> torch.Tensor:
         r"""Computing ``pi/actor`` loss.
 
@@ -90,11 +91,11 @@ class SACPID(SAC):
         Returns:
             The loss of pi/actor.
         """
-        action = self._actor_critic.actor.predict(obs, deterministic=False)
+        action = self._actor_critic.actor.predict(obs, risk, deterministic=False)
         log_prob = self._actor_critic.actor.log_prob(action)
-        loss_q_r_1, loss_q_r_2 = self._actor_critic.reward_critic(obs, action)
+        loss_q_r_1, loss_q_r_2 = self._actor_critic.reward_critic(obs, action, risk)
         loss_r = self._alpha * log_prob - torch.min(loss_q_r_1, loss_q_r_2)
-        loss_q_c = self._actor_critic.cost_critic(obs, action)[0]
+        loss_q_c = self._actor_critic.cost_critic(obs, action, risk)[0]
         loss_c = self._lagrange.lagrangian_multiplier * loss_q_c
 
         return (loss_r + loss_c).mean() / (1 + self._lagrange.lagrangian_multiplier)

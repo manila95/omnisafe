@@ -61,20 +61,6 @@ class OnPolicyAdapter(OnlineAdapter):
         self.total_cost = 0
         self.total_total_cost = 0
     
-        if self._cfgs.risk_cfgs.use_risk:
-            self.obs_size = self._env.observation_space.shape[0]
-            self.risk_model = BayesRiskEst(self.obs_size, out_size=self._cfgs.risk_cfgs.quantile_num)
-
-            if os.path.exists(self._cfgs.risk_cfgs.risk_model_path):
-                self.risk_model.load_state_dict(torch.load(self._cfgs.risk_cfgs.risk_model_path))
-            
-            if self._cfgs.risk_cfgs.fine_tune_risk:
-                self.risk_rb = ReplayBuffer()
-                self.risk_optim = torch.optim.Adam(self.risk_model.parameters(), lr=self._cfgs.risk_cfgs.risk_lr)
-                self.risk_bins =  np.array([i*self._cfgs.risk_cfgs.quantile_size for i in range(self._cfgs.risk_cfgs.quantile_num+1)])
-                self.risk_criterion = torch.nn.NLLLoss()
-            self.risk_model.eval()
-
 
     def rollout(  # pylint: disable=too-many-locals
         self,
@@ -99,7 +85,6 @@ class OnPolicyAdapter(OnlineAdapter):
         self._reset_log()
 
         obs, _ = self.reset()
-        f_next_obs, f_costs = None, None
         for step in track(
             range(steps_per_epoch),
             description=f'Processing rollout for epoch: {logger.current_epoch}...',
@@ -113,9 +98,7 @@ class OnPolicyAdapter(OnlineAdapter):
 
             self.total_total_cost += torch.sum(cost.int()).item()
             if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
-                f_next_obs = next_obs.unsqueeze(0) if f_next_obs is None else torch.concat([f_next_obs, next_obs.unsqueeze(0)], axis=0)
-                f_costs = cost.unsqueeze(0) if f_costs is None else torch.concat([f_costs, cost.unsqueeze(0)], axis=0)
-
+                self._store_risk_data(next_obs, cost)
             self._log_value(reward=reward, cost=cost, info=info)
 
             if self._cfgs.algo_cfgs.use_cost:
@@ -132,32 +115,13 @@ class OnPolicyAdapter(OnlineAdapter):
                 logp=logp,
             )
 
-            ## Updating the risk model 
             if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
-                self.risk_model.train()
-                if len(self.risk_rb) > self._cfgs.risk_cfgs.risk_batch_size and step % self._cfgs.risk_cfgs.risk_update_freq == 0:
-                    risk_data = self.risk_rb.sample(self._cfgs.risk_cfgs.risk_batch_size)
-                    pred = self.risk_model(risk_data["next_obs"].to(self._device))
-                    risk_loss = self.risk_criterion(pred, torch.argmax(risk_data["risks"].squeeze(), axis=1).to(self._device))
-                    self.risk_optim.zero_grad()
-                    risk_loss.backward()
-                    self.risk_optim.step()
-                    logger.store({'Loss/risk_loss': risk_loss})
-                self.risk_model.eval()
-                
-
+                self._update_risk(step, logger)
 
             if "final_observation" in info:
                 if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
-                    f_risks = torch.empty_like(f_costs)
-                    for i in range(self._num_envs):
-                        f_risks[:, i] = compute_fear(f_costs[:, i])
-                    
-                    e_risks = f_risks.view(-1, 1).cpu().numpy()
-                    e_risks_quant = torch.Tensor(np.apply_along_axis(lambda x: np.histogram(x, bins=self.risk_bins)[0], 1, np.expand_dims(e_risks, 1))).to(self._device)
-                    self.risk_rb.add(None, f_next_obs.view(-1, self.obs_size), None, None, None, None, e_risks_quant, f_risks.view(-1, 1))
-
-                    f_next_obs, f_costs = None, None
+                    self._populate_risk_rb()
+                
                 with torch.no_grad():
                     final_risk = self.risk_model(info["final_observation"]) if self._cfgs.risk_cfgs.use_risk  else None
 

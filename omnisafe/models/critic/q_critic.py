@@ -111,7 +111,8 @@ class QCritic(Critic):
                     use_risk=use_risk,
                     risk_size=risk_size
                 )
-                critic = nn.Sequential(net)
+                critic = net
+                # critic = nn.Sequential(net)
             self.net_lst.append(critic)
             self.add_module(f'critic_{idx}', critic)
 
@@ -138,7 +139,13 @@ class QCritic(Critic):
         for critic in self.net_lst:
             if self._use_obs_encoder:
                 obs_encode = critic[0](obs)
-                res.append(torch.squeeze(critic[1](torch.cat([obs_encode, act], dim=-1), risk), -1))
+                if risk is None:
+                    res.append(torch.squeeze(critic[1](torch.cat([obs_encode, act], dim=-1)), -1))
+                else:
+                    res.append(torch.squeeze(critic[1](torch.cat([obs_encode, act], dim=-1), risk), -1))
             else:
-                res.append(torch.squeeze(critic(torch.cat([obs, act], dim=-1), risk), -1))
+                if risk is None:
+                    res.append(torch.squeeze(critic(torch.cat([obs, act], dim=-1)), -1))
+                else:
+                    res.append(torch.squeeze(critic(torch.cat([obs, act], dim=-1), risk), -1))
         return res

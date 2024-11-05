@@ -49,6 +49,8 @@ class SAC(DDPG):
             act_space=self._env.action_space,
             model_cfgs=self._cfgs.model_cfgs,
             epochs=self._epochs,
+            use_risk=self._cfgs.risk_cfgs.use_risk,
+            risk_size=self._cfgs.risk_cfgs.quantile_num,
         ).to(self._device)
 
     def _init(self) -> None:
@@ -93,10 +95,12 @@ class SAC(DDPG):
     def _update_reward_critic(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
         action: torch.Tensor,
         reward: torch.Tensor,
         done: torch.Tensor,
         next_obs: torch.Tensor,
+        next_risk: torch.Tensor,
     ) -> None:
         """Update reward critic.
 
@@ -113,17 +117,19 @@ class SAC(DDPG):
             done (torch.Tensor): The ``terminated`` sampled from buffer.
             next_obs (torch.Tensor): The ``next observation`` sampled from buffer.
         """
+        
         with torch.no_grad():
-            next_action = self._actor_critic.actor.predict(next_obs, deterministic=False)
+            next_action = self._actor_critic.actor.predict(next_obs, next_risk, deterministic=False)
             next_logp = self._actor_critic.actor.log_prob(next_action)
             next_q1_value_r, next_q2_value_r = self._actor_critic.target_reward_critic(
                 next_obs,
                 next_action,
+                next_risk,
             )
             next_q_value_r = torch.min(next_q1_value_r, next_q2_value_r) - next_logp * self._alpha
             target_q_value_r = reward + self._cfgs.algo_cfgs.gamma * (1 - done) * next_q_value_r
 
-        q1_value_r, q2_value_r = self._actor_critic.reward_critic(obs, action)
+        q1_value_r, q2_value_r = self._actor_critic.reward_critic(obs, action, risk)
         loss = nn.functional.mse_loss(q1_value_r, target_q_value_r) + nn.functional.mse_loss(
             q2_value_r,
             target_q_value_r,
@@ -152,17 +158,19 @@ class SAC(DDPG):
     def _update_actor(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
     ) -> None:
         """Update actor and alpha if ``auto_alpha`` is True.
 
         Args:
             obs (torch.Tensor): The ``observation`` sampled from buffer.
         """
-        super()._update_actor(obs)
+        super()._update_actor(obs, risk)
 
         if self._cfgs.algo_cfgs.auto_alpha:
             with torch.no_grad():
-                action = self._actor_critic.actor.predict(obs, deterministic=False)
+                
+                action = self._actor_critic.actor.predict(obs, risk, deterministic=False)
                 log_prob = self._actor_critic.actor.log_prob(action)
             alpha_loss = -self._log_alpha * (log_prob + self._target_entropy).mean()
 
@@ -183,6 +191,7 @@ class SAC(DDPG):
     def _loss_pi(
         self,
         obs: torch.Tensor,
+        risk: torch.Tensor,
     ) -> torch.Tensor:
         r"""Computing ``pi/actor`` loss.
 
@@ -201,9 +210,9 @@ class SAC(DDPG):
         Returns:
             The loss of pi/actor.
         """
-        action = self._actor_critic.actor.predict(obs, deterministic=False)
+        action = self._actor_critic.actor.predict(obs, risk, deterministic=False)
         log_prob = self._actor_critic.actor.log_prob(action)
-        q1_value_r, q2_value_r = self._actor_critic.reward_critic(obs, action)
+        q1_value_r, q2_value_r = self._actor_critic.reward_critic(obs, action, risk)
         return (self._alpha * log_prob - torch.min(q1_value_r, q2_value_r)).mean()
 
     def _log_when_not_update(self) -> None:

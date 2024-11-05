@@ -79,6 +79,20 @@ if __name__ == '__main__':
         metavar='SEED',
         help='seed for random number generator',
     )
+    parser.add_argument(
+        '--use-resets',
+        type=bool,
+        default=False,
+        metavar='RESETS',
+        help='whether to use resets',
+    )
+    parser.add_argument(
+        '--reset-freq',
+        type=int,
+        default=1000000,
+        metavar='RESET-FREQ',
+        help='reset frequency',
+    )
     args, unparsed_args = parser.parse_known_args()
     unparsed_args = [x.replace("=", " ") for x in unparsed_args]
     unparsed_args = [y for x in unparsed_args for y in x.split()]

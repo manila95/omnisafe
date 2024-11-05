@@ -51,6 +51,8 @@ class GaussianSACActor(Actor):
         hidden_sizes: list[int],
         activation: Activation = 'relu',
         weight_initialization_mode: InitFunction = 'kaiming_uniform',
+        use_risk: bool = False,
+        risk_size: int = 2,
     ) -> None:
         """Initialize an instance of :class:`GaussianSACActor`."""
         super().__init__(obs_space, act_space, hidden_sizes, activation, weight_initialization_mode)
@@ -64,7 +66,7 @@ class GaussianSACActor(Actor):
         self._current_raw_action: torch.Tensor | None = None
         self.register_buffer('_log2', torch.log(torch.tensor(2.0)))
 
-    def _distribution(self, obs: torch.Tensor) -> Normal:
+    def _distribution(self, obs: torch.Tensor, risk: torch.Tensor=None) -> Normal:
         """Get the distribution of the actor.
 
         .. warning::
@@ -84,7 +86,7 @@ class GaussianSACActor(Actor):
         std = log_std.exp()
         return Normal(mean, std)
 
-    def predict(self, obs: torch.Tensor, deterministic: bool = False) -> torch.Tensor:
+    def predict(self, obs: torch.Tensor, risk: torch.Tensor=None, deterministic: bool = False) -> torch.Tensor:
         """Predict the action given observation.
 
         The predicted action depends on the ``deterministic`` flag.
@@ -108,7 +110,7 @@ class GaussianSACActor(Actor):
 
         return torch.tanh(action)
 
-    def forward(self, obs: torch.Tensor) -> TanhNormal:
+    def forward(self, obs: torch.Tensor, risk: torch.Tensor=None) -> TanhNormal:
         """Forward method.
 
         Args:
