@@ -91,7 +91,7 @@ class OnlineAdapter:
 
             self.obs_size = self._env.observation_space.shape[0]
             self.risk_model = BayesRiskEst(self.obs_size, out_size=self._cfgs.risk_cfgs.quantile_num)
-
+            self.risk_model.to(self._device)
             if os.path.exists(self._cfgs.risk_cfgs.risk_model_path):
                 self.risk_model.load_state_dict(torch.load(self._cfgs.risk_cfgs.risk_model_path))
             
