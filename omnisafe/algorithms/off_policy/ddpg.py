@@ -317,11 +317,13 @@ class DDPG(BaseAlgo):
                 update_time += time.time() - update_start
 
             eval_start = time.time()
-            self._env.eval_policy(
-                episode=self._cfgs.train_cfgs.eval_episodes,
-                agent=self._actor_critic,
-                logger=self._logger,
-            )
+            if self._cfgs.train_cfgs.eval_episodes > 0:
+                self._env.eval_policy(
+                    episode=self._cfgs.train_cfgs.eval_episodes,
+                    agent=self._actor_critic,
+                    logger=self._logger,
+                )
+
             eval_time = time.time() - eval_start
 
             self._logger.store({'Time/Update': update_time})
