@@ -18,6 +18,13 @@ defaults:
   seed: 0
   # training configurations
   train_cfgs:
+    pid_kp: 0.1
+    # The Ki of PID controller
+    pid_ki: 0.01
+    # The Kd of PID controller
+    pid_kd: 0.01
+    # Initial value of lagrangian multiplier
+    lagrangian_multiplier_init: 0.001
     # device to use for training, options: cpu, cuda, cuda:0, cuda:0,1, etc.
     device: cpu
     # number of threads for torch
@@ -28,6 +35,7 @@ defaults:
     parallel: 1
     # total number of steps to train
     total_steps: 10000000
+    cost_limit: 10.0
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy
@@ -167,7 +175,7 @@ SafeMetaDrive:
     cost_normalize: True
     # normalize observation
     obs_normalize: False
-    # max gradient norm
+    # max gradient norm=-='m'
     max_grad_norm: 20.0
     cost_limit: 1
   # model configurations

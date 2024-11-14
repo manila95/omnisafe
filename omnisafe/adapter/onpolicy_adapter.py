@@ -95,7 +95,10 @@ class OnPolicyAdapter(OnlineAdapter):
             act, value_r, value_c, logp = agent.step(obs, risk)
 
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
-
+            if cost > 0:
+                cost = torch.Tensor([1.0])
+            else:
+                cost = torch.Tensor([0.0])
             self.total_total_cost += torch.sum(cost.int()).item()
             if self._cfgs.risk_cfgs.use_risk and self._cfgs.risk_cfgs.fine_tune_risk:
                 self._store_risk_data(next_obs, cost)

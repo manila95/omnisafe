@@ -77,6 +77,7 @@ class PIDLagrangian(abc.ABC):  # noqa: B024
         self._sum_norm: bool = sum_norm
         self._diff_norm: bool = diff_norm
         self._pid_i: float = lagrangian_multiplier_init
+        self._lagrangian_multiplier: float = lagrangian_multiplier_init
         self._cost_ds: deque[float] = deque(maxlen=self._pid_d_delay)
         self._cost_ds.append(0.0)
         self._delta_p: float = 0.0
@@ -87,6 +88,7 @@ class PIDLagrangian(abc.ABC):  # noqa: B024
     @property
     def lagrangian_multiplier(self) -> float:
         """The lagrangian multiplier."""
+        self._lagrangian_multiplier = self._cost_penalty
         return self._cost_penalty
 
     def pid_update(self, ep_cost_avg: float) -> None:
@@ -105,6 +107,7 @@ class PIDLagrangian(abc.ABC):  # noqa: B024
         Args:
             ep_cost_avg (float): The average cost of the current episode.
         """
+        print("Cost limit inside lagrange", self._cost_limit)
         delta = float(ep_cost_avg - self._cost_limit)
         self._pid_i = max(0.0, self._pid_i + delta * self._pid_ki)
         if self._diff_norm:
@@ -117,9 +120,12 @@ class PIDLagrangian(abc.ABC):  # noqa: B024
         self._cost_d += (1 - a_d) * float(ep_cost_avg)
         pid_d = max(0.0, self._cost_d - self._cost_ds[0])
         pid_o = self._pid_kp * self._delta_p + self._pid_i + self._pid_kd * pid_d
+#        print(pid_o)
         self._cost_penalty = max(0.0, pid_o)
         if self._diff_norm:
             self._cost_penalty = min(1.0, self._cost_penalty)
         if not (self._diff_norm or self._sum_norm):
             self._cost_penalty = min(self._cost_penalty, self._penalty_max)
         self._cost_ds.append(self._cost_d)
+#        print(self._cost_penalty)
+        self._lagrangian_multiplier = self._cost_penalty 

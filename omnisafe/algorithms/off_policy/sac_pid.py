@@ -60,12 +60,13 @@ class SACPID(SAC):
         :meth:`pid_update` method.
         """
         super()._update()
+        #print("in the update step")
         Jc = self._logger.get_stats('Metrics/EpCost')[0]
         if self._epoch > self._cfgs.algo_cfgs.warmup_epochs:
             self._lagrange.pid_update(Jc)
         self._logger.store(
             {
-                'Metrics/LagrangeMultiplier': self._lagrange.lagrangian_multiplier,
+                'Metrics/LagrangeMultiplier': self._lagrange._lagrangian_multiplier,
             },
         )
 
@@ -97,13 +98,14 @@ class SACPID(SAC):
         loss_r = self._alpha * log_prob - torch.min(loss_q_r_1, loss_q_r_2)
         loss_q_c = self._actor_critic.cost_critic(obs, action, risk)[0]
         loss_c = self._lagrange.lagrangian_multiplier * loss_q_c
-
-        return (loss_r + loss_c).mean() / (1 + self._lagrange.lagrangian_multiplier)
+        #print(self._lagrange._lagrangian_multiplier)
+        #print(self._lagrange._cost_penalty)
+        return (loss_r + loss_c).mean() / (1 + self._lagrange._lagrangian_multiplier)
 
     def _log_when_not_update(self) -> None:
         super()._log_when_not_update()
         self._logger.store(
             {
-                'Metrics/LagrangeMultiplier': self._lagrange.lagrangian_multiplier,
+                'Metrics/LagrangeMultiplier': self._lagrange._lagrangian_multiplier,
             },
         )

@@ -35,6 +35,14 @@ defaults:
     eval_episodes: 1
     # number of steps to update the policy
     steps_per_epoch: 2000
+    # The Kp of PID controller
+    pid_kp: 0.000001
+    # The Ki of PID controller
+    pid_ki: 0.0000001
+    # The Kd of PID controller
+    pid_kd: 0.0000001
+    # inital value of the lagrange multiplier
+    lagrangian_multiplier_init: 0.001
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy
@@ -64,7 +72,7 @@ defaults:
     # The discount factor of GAE
     gamma: 0.99
     # Actor perdorm random action before `start_learning_steps` steps
-    start_learning_steps: 10000
+    start_learning_steps: 0
     # The delay step of policy update
     policy_delay: 2
     # Whether to use the exploration noise
@@ -82,7 +90,7 @@ defaults:
     # use cost
     use_cost: True
     # warm up epoch
-    warmup_epochs: 100
+    warmup_epochs: 0
   # logger configurations
   logger_cfgs:
     # use wandb for logging
@@ -142,7 +150,7 @@ defaults:
     # Whether to normalize the derivate of the cost.
     diff_norm: False
     # Tolerance of constraint violation
-    cost_limit: 25.0
+    cost_limit: 10.0
     # The max penalty coefficient
     penalty_max: 100.0
     # Initial value of lagrangian multiplier

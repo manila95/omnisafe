@@ -80,32 +80,67 @@ if __name__ == '__main__':
         help='seed for random number generator',
     )
     parser.add_argument(
-        '--use-resets',
-        type=bool,
-        default=False,
-        metavar='RESETS',
-        help='whether to use resets',
+        '--cost-limit',
+        type=float,
+        default=10.0,
+        metavar='STEPS',
+        help='total number of steps to train for algorithm',
+    )
+    # parser.add_argument(
+    #     '--use-resets',
+    #     type=bool,
+    #     default=False,
+    #     metavar='RESETS',
+    #     help='whether to use resets',
+    # )
+    # parser.add_argument(
+    #     '--reset-freq',
+    #     type=int,
+    #     default=1000000,
+    #     metavar='RESET-FREQ',
+    #     help='reset frequency',
+    # )
+    # parser.add_argument(
+    #     '--eval-episodes',
+    #     type=int,
+    #     default=0,
+    #     metavar='EVAL EPISODES',
+    #     help='how frequently to evaluate the policy (0 means no evaluation only on training environment)',
+    # )
+    # parser.add_argument(
+    #     '--steps-per-epoch',
+    #     type=int,
+    #     default=20000,
+    #     metavar='STEPS PER EPOCH',
+    #     help='how many steps to execute in each epoch',
+    # )
+    parser.add_argument(
+        '--pid-kp',
+        type=float,
+        default=0.1,
+        metavar='STEPS',
+        help='total number of steps to train for algorithm',
     )
     parser.add_argument(
-        '--reset-freq',
-        type=int,
-        default=1000000,
-        metavar='RESET-FREQ',
-        help='reset frequency',
+        '--pid-kd',
+        type=float,
+        default=0.001,
+        metavar='STEPS',
+        help='total number of steps to train for algorithm',
     )
     parser.add_argument(
-        '--eval-episodes',
-        type=int,
-        default=0,
-        metavar='EVAL EPISODES',
-        help='how frequently to evaluate the policy (0 means no evaluation only on training environment)',
+        '--pid-ki',
+        type=float,
+        default=0.01,
+        metavar='STEPS',
+        help='total number of steps to train for algorithm',
     )
     parser.add_argument(
-        '--steps-per-epoch',
-        type=int,
-        default=2000,
-        metavar='STEPS PER EPOCH',
-        help='how many steps to execute in each epoch',
+        '--lagrangian-multiplier-init',
+        type=float,
+        default=0.001,
+        metavar='STEPS',
+        help='total number of steps to train for algorithm',
     )
     args, unparsed_args = parser.parse_known_args()
     unparsed_args = [x.replace("=", " ") for x in unparsed_args]

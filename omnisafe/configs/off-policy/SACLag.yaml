@@ -18,6 +18,10 @@ defaults:
   seed: 0
   # training configurations
   train_cfgs:
+    # whether to use resets or not
+    use_resets: False
+    # what frequency to reset the agent (in steps)
+    reset_freq: 1000000
     # device to use for training, options: cpu, cuda, cuda:0, cuda:0,1, etc.
     device: cpu
     # number of threads for torch
@@ -30,6 +34,14 @@ defaults:
     total_steps: 1000000
     # number of evaluate episodes
     eval_episodes: 1
+    # The Kp of PID controller
+    pid_kp: 0.000001
+    # The Ki of PID controller
+    pid_ki: 0.0000001
+    # The Kd of PID controller
+    pid_kd: 0.0000001
+    # inital value of the lagrange multiplier
+    lagrangian_multiplier_init: 0.001
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy
@@ -128,6 +140,23 @@ defaults:
     lambda_lr: 0.00001
     # Type of lagrangian optimizer
     lambda_optimizer: "Adam"
+  risk_cfgs:
+    # use risk model or not ?
+    use_risk: False
+    # do we have a pretrained risk model ?
+    risk_model_path: None
+    # do we update the the risk model ?
+    fine_tune_risk: False
+    # what should be the quantile size of the risk distribution?
+    quantile_size: 4
+    # what should be the number of samples for the risk model?
+    quantile_num: 10
+    # learning rate
+    risk_lr: 0.0001
+    # batch size
+    risk_batch_size: 128
+    # frequency of updating the risk model
+    risk_update_freq: 100
 
 SafetyCarCircle1-v0:
   # algorithm configurations
