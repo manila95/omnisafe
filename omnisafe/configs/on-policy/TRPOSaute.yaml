@@ -28,6 +28,12 @@ defaults:
     parallel: 1
     # total number of steps to train
     total_steps: 10000000
+    cost_limit: 10.0
+    unsafe_reward: -1.0
+    saute_gamma: 0.999
+    distance: 2.0 
+    steps_per_epoch: 20000
+
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy

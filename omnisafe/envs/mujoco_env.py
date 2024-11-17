@@ -35,7 +35,7 @@ class MujocoEnv(CMDP):
         need_time_limit_wrapper (bool): Whether to use time limit wrapper.
     """
 
-    need_auto_reset_wrapper = True
+    need_auto_reset_wrapper = False
 
     need_time_limit_wrapper = False
     need_action_repeat_wrapper = True
@@ -72,16 +72,16 @@ class MujocoEnv(CMDP):
         """
         super().__init__(env_id)
         self._env_id = env_id
-        if num_envs == 1:
+        if num_envs:
             # set healthy_reward=0.0 for removing the safety constraint in reward
-            self._env = gymnasium.make(id=env_id, autoreset=False, **kwargs)
-            assert isinstance(self._env.action_space, Box), 'Only support Box action space.'
+            self._env = gymnasium.vector.make(id=env_id, num_envs=num_envs, autoreset=False, **kwargs)
+            assert isinstance(self._env.single_action_space, Box), 'Only support Box action space.'
             assert isinstance(
-                self._env.observation_space,
+                self._env.single_observation_space,
                 Box,
             ), 'Only support Box observation space.'
-            self._action_space = self._env.action_space
-            self._observation_space = self._env.observation_space
+            self._action_space = self._env.single_action_space
+            self._observation_space = self._env.single_observation_space
         else:
             raise NotImplementedError('Only support num_envs=1 now.')
         self._device = torch.device(device)
