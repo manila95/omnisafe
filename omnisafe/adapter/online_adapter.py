@@ -94,7 +94,8 @@ class OnlineAdapter:
             self.risk_model.to(self._device)
             if os.path.exists(self._cfgs.risk_cfgs.risk_model_path):
                 self.risk_model.load_state_dict(torch.load(self._cfgs.risk_cfgs.risk_model_path))
-            
+                print("Risk model loaded from path: ", self._cfgs.risk_cfgs.risk_model_path)
+
             if self._cfgs.risk_cfgs.fine_tune_risk:
                 self.risk_rb = ReplayBuffer()
                 self.risk_optim = torch.optim.Adam(self.risk_model.parameters(), lr=self._cfgs.risk_cfgs.risk_lr)
