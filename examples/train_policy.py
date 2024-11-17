@@ -80,30 +80,58 @@ if __name__ == '__main__':
         help='seed for random number generator',
     )
     parser.add_argument(
-        '--use-resets',
-        type=bool,
-        default=False,
-        metavar='RESETS',
-        help='whether to use resets',
+        '--cost-limit',
+        type=float,
+        default=10,
+        metavar='THREADS',
+        help='number of threads to use for torch',
     )
     parser.add_argument(
-        '--reset-freq',
-        type=int,
-        default=1000000,
-        metavar='RESET-FREQ',
-        help='reset frequency',
+        '--unsafe-reward',
+        type=float,
+        default=-1.0,
+        metavar='THREADS',
+        help='number of threads to use for torch',
     )
     parser.add_argument(
-        '--eval-episodes',
-        type=int,
-        default=0,
-        metavar='EVAL EPISODES',
-        help='how frequently to evaluate the policy (0 means no evaluation only on training environment)',
+        '--saute-gamma',
+        type=float,
+        default=0.999,
+        metavar='THREADS',
+        help='number of threads to use for torch',
     )
+    parser.add_argument(
+        '--distance',
+        type=float,
+        default=2.0,
+        metavar='THREADS',
+        help='number of threads to use for torch',
+    )
+    # parser.add_argument(
+    #     '--use-resets',
+    #     type=bool,
+    #     default=False,
+    #     metavar='RESETS',
+    #     help='whether to use resets',
+    # )
+    # parser.add_argument(
+    #     '--reset-freq',
+    #     type=int,
+    #     default=1000000,
+    #     metavar='RESET-FREQ',
+    #     help='reset frequency',
+    # )
+    # parser.add_argument(
+    #     '--eval-episodes',
+    #     type=int,
+    #     default=0,
+    #     metavar='EVAL EPISODES',
+    #     help='how frequently to evaluate the policy (0 means no evaluation only on training environment)',
+    # )
     parser.add_argument(
         '--steps-per-epoch',
         type=int,
-        default=2000,
+        default=20000,
         metavar='STEPS PER EPOCH',
         help='how many steps to execute in each epoch',
     )
