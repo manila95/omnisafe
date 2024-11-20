@@ -61,6 +61,14 @@ class BaseAlgo(ABC):  # pylint: disable=too-few-public-methods
         except:
             pass
 
+        try:
+            self._cfgs.lagrange_cfgs.pid_kp = self._cfgs.train_cfgs.cost_limit
+            self._cfgs.lagrange_cfgs.pid_kd = self._cfgs.train_cfgs.cost_limit
+            self._cfgs.lagrange_cfgs.pid_ki = self._cfgs.train_cfgs.cost_limit
+            self._cfgs.lagrange_cfgs.lagrangian_multiplier_init = self._cfgs.train_cfgs.lagrangian_multiplier_init
+            print("Lagrange Success")
+        except:
+            pass
         distributed.setup_distributed()
 
         self._init_env()

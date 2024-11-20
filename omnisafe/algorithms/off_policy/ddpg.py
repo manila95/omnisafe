@@ -283,11 +283,11 @@ class DDPG(BaseAlgo):
             rollout_time = 0.0
             update_time = 0.0
             epoch_time = time.time()
-
-            for sample_step in range(
+            import tqdm
+            for sample_step in tqdm.tqdm(range(
                 epoch * self._samples_per_epoch,
                 (epoch + 1) * self._samples_per_epoch,
-            ):
+            )):
                 
                 if self._cfgs.train_cfgs.use_resets and self._env.total_step % self._cfgs.train_cfgs.reset_freq == 0:
                     self._init_model()

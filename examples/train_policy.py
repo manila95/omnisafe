@@ -129,6 +129,34 @@ if __name__ == '__main__':
     #     help='how frequently to evaluate the policy (0 means no evaluation only on training environment)',
     # )
     parser.add_argument(
+        '--pid-kp',
+        type=float,
+        default=0.000001,
+        metavar='THREADS',
+        help='number of threads to use for torch',
+    )
+    parser.add_argument(
+        '--pid-ki',
+        type=float,
+        default=0.000001,
+        metavar='THREADS',
+        help='number of threads to use for torch',
+    )
+    parser.add_argument(
+        '--pid-kd',
+        type=float,
+        default=0.0000001,
+        metavar='THREADS',
+        help='number of threads to use for torch',
+    )
+    parser.add_argument(
+        '--lagrangian-multiplier-init',
+        type=float,
+        default=0.001,
+        metavar='THREADS',
+        help='number of threads to use for torch',
+    )
+    parser.add_argument(
         '--steps-per-epoch',
         type=int,
         default=20000,

@@ -17,6 +17,18 @@ defaults:
   # seed for random number generator
   seed: 0
   train_cfgs:
+    pid_kp: 0.001
+    # The Ki of PID controller
+    pid_ki: 0.0000001
+    # The Kd of PID controller
+    pid_kd: 0.0000001
+    lagrangian_multiplier_init: 0.001
+    #total_steps: 10000000
+    cost_limit: 10.0
+    unsafe_reward: -1.0
+    saute_gamma: 0.999
+    distance: 2.0
+      #steps_per_epoch: 20000
     # whether to use resets or not
     use_resets: False 
     # what frequency to reset the agent (in steps)
@@ -82,7 +94,7 @@ defaults:
     # use cost
     use_cost: True
     # warm up epoch
-    warmup_epochs: 100
+    warmup_epochs: 0
   # logger configurations
   logger_cfgs:
     # use wandb for logging
