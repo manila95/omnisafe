@@ -33,7 +33,9 @@ defaults:
     saute_gamma: 0.999
     distance: 2.0 
     steps_per_epoch: 20000
-
+    lagrangian_multiplier_init: 10.0
+    pid_kp: 0.0001
+    
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy

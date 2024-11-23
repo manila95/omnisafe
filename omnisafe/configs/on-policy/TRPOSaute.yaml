@@ -39,6 +39,8 @@ defaults:
     # The Kd of PID controller
     pid_kd: 0.0000001
     lagrangian_multiplier_init: 0.001
+    lagrangian_multiplier_init: 10.0
+    pid_kp: 0.0001
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy
