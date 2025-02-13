@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 import torch
+import numpy as np
 from rich.progress import track
 
 from omnisafe.adapter.online_adapter import OnlineAdapter
@@ -78,12 +79,15 @@ class OnPolicyAdapter(OnlineAdapter):
         self._reset_log()
 
         obs, _ = self.reset()
+        ep_std = []
         for step in track(
             range(steps_per_epoch),
             description=f'Processing rollout for epoch: {logger.current_epoch}...',
         ):
             act, value_r, value_c, logp = agent.step(obs)
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
+
+            ep_std.append(agent.actor.std)
 
             self._log_value(reward=reward, cost=cost, info=info)
 
@@ -110,6 +114,7 @@ class OnPolicyAdapter(OnlineAdapter):
                         f'\nWarning: trajectory cut off when rollout by epoch\
                             in {self._env.num_envs - num_dones} of {self._env.num_envs} environments.',
                     )
+                logger.store({'EpStd': np.mean(ep_std)})
 
             for idx, (done, time_out) in enumerate(zip(terminated, truncated)):
                 if epoch_end or done or time_out:

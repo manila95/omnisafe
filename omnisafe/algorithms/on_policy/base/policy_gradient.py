@@ -230,6 +230,7 @@ class PolicyGradient(BaseAlgo):
         self._logger.register_key('Time/Update')
         self._logger.register_key('Time/Epoch')
         self._logger.register_key('Time/FPS')
+        self._logger.register_key('EpStd')
 
         # register environment specific keys
         for env_spec_key in self._env.env_spec_keys:
