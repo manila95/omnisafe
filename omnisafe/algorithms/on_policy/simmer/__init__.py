@@ -15,10 +15,12 @@
 """Simmer Reinforcement Learning algorithms."""
 
 from omnisafe.algorithms.on_policy.simmer.ppo_simmer_pid import PPOSimmerPID
+from omnisafe.algorithms.on_policy.simmer.sam_trpo_simmer_pid import SAMTRPOSimmerPID
 from omnisafe.algorithms.on_policy.simmer.trpo_simmer_pid import TRPOSimmerPID
 
 
 __all__ = [
     'TRPOSimmerPID',
     'PPOSimmerPID',
+    'SAMTRPOSimmerPID',
 ]

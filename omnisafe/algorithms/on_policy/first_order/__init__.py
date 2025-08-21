@@ -16,9 +16,12 @@
 
 from omnisafe.algorithms.on_policy.first_order.cup import CUP
 from omnisafe.algorithms.on_policy.first_order.focops import FOCOPS
-
+from omnisafe.algorithms.on_policy.first_order.sam_cup import SAMCUP
+from omnisafe.algorithms.on_policy.first_order.sam_focops import SAMFOCOPS
 
 __all__ = [
     'CUP',
     'FOCOPS',
+    'SAMCUP',
+    'SAMFOCOPS',
 ]

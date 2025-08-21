@@ -15,8 +15,9 @@
 """Primal algorithms."""
 
 from omnisafe.algorithms.on_policy.primal.crpo import OnCRPO
-
+from omnisafe.algorithms.on_policy.primal.sam_crpo import SAMOnCRPO
 
 __all__ = [
     'OnCRPO',
+    'SAMOnCRPO',
 ]
