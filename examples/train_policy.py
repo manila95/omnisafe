@@ -15,9 +15,23 @@
 """Example of training a policy with OmniSafe."""
 
 import argparse
+import random
+import numpy as np
+import torch
 
 import omnisafe
 from omnisafe.utils.tools import custom_cfgs_to_dict, update_dict
+
+
+def set_seed(seed):
+    """Set seed for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 if __name__ == '__main__':
@@ -36,6 +50,13 @@ if __name__ == '__main__':
         metavar='ENV',
         default='SafetyPointGoal1-v0',
         help='the name of test environment',
+    )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=42,
+        metavar='SEED',
+        help='random seed for reproducibility',
     )
     parser.add_argument(
         '--parallel',
@@ -61,14 +82,14 @@ if __name__ == '__main__':
     parser.add_argument(
         '--vector-env-nums',
         type=int,
-        default=1,
+        default=5,
         metavar='VECTOR-ENV',
         help='number of vector envs to use for training',
     )
     parser.add_argument(
         '--torch-threads',
         type=int,
-        default=16,
+        default=4,
         metavar='THREADS',
         help='number of threads to use for torch',
     )
@@ -77,7 +98,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--cost-limit',
         type=float,
-        default=None,
+        default=10,
         metavar='LIMIT',
         help='cost limit for constrained algorithms (default: use config file value)',
     )
@@ -159,7 +180,7 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--sam-adaptive',
-        action='store_true',
+        default="False",
         help='use adaptive SAM (ASAM) instead of standard SAM',
     )
     parser.add_argument(
@@ -176,7 +197,34 @@ if __name__ == '__main__':
         choices=['default', 'conservative', 'aggressive', 'ppo', 'trpo', 'cup', 'focops', 'cpo'],
         help='use a preset SAM configuration instead of individual parameters',
     )
-    
+    parser.add_argument(
+        '--lagrangian-multiplier-init',
+        type=float,
+        default=0.001,
+        metavar='INIT',
+        help='initial value of lagrangian multiplier',
+    )
+    parser.add_argument(
+        '--pid-kp',
+        type=float,
+        default=0.1,
+        metavar='KP',
+        help='proportional gain for PID controller',
+    )
+    parser.add_argument(
+        '--pid-ki',
+        type=float,
+        default=0.01,
+        metavar='KI',
+        help='integral gain for PID controller',
+    )
+    parser.add_argument(
+        '--pid-kd',
+        type=float,
+        default=0.01,
+        metavar='KD',
+        help='derivative gain for PID controller',
+    )
     args, unparsed_args = parser.parse_known_args()
     keys = [k[2:] for k in unparsed_args[0::2]]
     values = list(unparsed_args[1::2])
@@ -187,15 +235,32 @@ if __name__ == '__main__':
         update_dict(custom_cfgs, custom_cfgs_to_dict(k, v))
     
     # Handle additional hyperparameters
-    if args.cost_limit is not None:
-        if 'env_cfgs' not in custom_cfgs:
-            custom_cfgs['env_cfgs'] = {}
-        custom_cfgs['env_cfgs']['cost_limit'] = args.cost_limit
+    args.sam_adaptive = args.sam_adaptive.lower() == 'true'
     
     if args.steps_per_epoch is not None:
         if 'algo_cfgs' not in custom_cfgs:
             custom_cfgs['algo_cfgs'] = {}
         custom_cfgs['algo_cfgs']['steps_per_epoch'] = args.steps_per_epoch
+
+    if "PID" in args.algo or args.algo in ['CUP', 'FOCOPS', 'SAMCUP', 'SAMFOCOPS']:
+        if 'lagrange_cfgs' not in custom_cfgs:
+            custom_cfgs['lagrange_cfgs'] = {}
+        custom_cfgs['lagrange_cfgs']['cost_limit'] = args.cost_limit
+        custom_cfgs['lagrange_cfgs']['lagrangian_multiplier_init'] = args.lagrangian_multiplier_init
+    elif "saute" in args.algo.lower():
+        print(args.algo)
+        if 'algo_cfgs' not in custom_cfgs:
+            custom_cfgs['algo_cfgs'] = {}
+        custom_cfgs['algo_cfgs']['safety_budget'] = args.cost_limit
+    else:
+        if 'algo_cfgs' not in custom_cfgs:
+            custom_cfgs['algo_cfgs'] = {}
+        custom_cfgs['algo_cfgs']['cost_limit'] = args.cost_limit
+
+    if "PID" in args.algo:
+        custom_cfgs['lagrange_cfgs']['pid_kp'] = args.pid_kp
+        custom_cfgs['lagrange_cfgs']['pid_ki'] = args.pid_ki
+        custom_cfgs['lagrange_cfgs']['pid_kd'] = args.pid_kd
     
     # Handle Weights & Biases configuration
     wandb_enabled = args.use_wandb and not args.no_wandb
@@ -257,11 +322,19 @@ if __name__ == '__main__':
         for key, value in sam_config.items():
             print(f"  {key}: {value}")
 
+    # Set seed for reproducibility
+    set_seed(args.seed)
+    print(f"Set random seed to {args.seed} for reproducibility")
+    
+    # Add seed to custom configurations
+    custom_cfgs['seed'] = args.seed
+    
     # Filter out SAM parameters and additional hyperparameters from training config
     train_cfgs = vars(args).copy()
-    sam_params = ['sam_rho', 'sam_actor_rho', 'sam_critic_rho', 'sam_cost_critic_rho', 'sam_adaptive', 'sam_eps', 'sam_config_preset']
+    sam_params = ['sam_rho', 'sam_actor_rho', 'sam_critic_rho', 'sam_cost_critic_rho', 'sam_adaptive', 'sam_eps', 'sam_config_preset', 'seed']
     additional_params = ['cost_limit', 'steps_per_epoch', 'use_wandb', 'no_wandb', 'wandb_project', 'wandb_entity', 'wandb_group', 'wandb_name']
-    params_to_remove = sam_params + additional_params
+    lagrange_params = ['pid_kp', 'pid_ki', 'pid_kd', 'lagrangian_multiplier_init']
+    params_to_remove = sam_params + additional_params + lagrange_params
     for param in params_to_remove:
         if param in train_cfgs:
             del train_cfgs[param]

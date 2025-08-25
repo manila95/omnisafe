@@ -140,9 +140,17 @@ class PolicyGradient(BaseAlgo):
         +-----------------------+----------------------------------------------------------------------+
         | Metrics/EpCost        | Average cost of the epoch.                                           |
         +-----------------------+----------------------------------------------------------------------+
+        | Metrics/EpCostStd     | Standard deviation of cost of the epoch.                             |
+        +-----------------------+----------------------------------------------------------------------+
         | Metrics/EpRet         | Average return of the epoch.                                         |
         +-----------------------+----------------------------------------------------------------------+
+        | Metrics/EpRetStd      | Standard deviation of return of the epoch.                           |
+        +-----------------------+----------------------------------------------------------------------+
         | Metrics/EpLen         | Average length of the epoch.                                         |
+        +-----------------------+----------------------------------------------------------------------+
+        | Metrics/EpViolation   | Number of episodes with constraint violations in the epoch.           |
+        +-----------------------+----------------------------------------------------------------------+
+        | Metrics/TotalViolation| Total number of constraint violations across all epochs.              |
         +-----------------------+----------------------------------------------------------------------+
         | Values/reward         | Average value in :meth:`rollout` (from critic network) of the epoch. |
         +-----------------------+----------------------------------------------------------------------+
@@ -191,15 +199,34 @@ class PolicyGradient(BaseAlgo):
         self._logger.register_key(
             'Metrics/EpRet',
             window_length=self._cfgs.logger_cfgs.window_lens,
+            min_and_max=True,
         )
         self._logger.register_key(
             'Metrics/EpCost',
             window_length=self._cfgs.logger_cfgs.window_lens,
+            min_and_max=True,
         )
         self._logger.register_key(
             'Metrics/EpLen',
             window_length=self._cfgs.logger_cfgs.window_lens,
         )
+        self._logger.register_key(
+            'Metrics/EpViolation',
+            window_length=self._cfgs.logger_cfgs.window_lens,
+        )
+        self._logger.register_key('Metrics/TotalViolation')
+        
+        # Register additional episode-level statistics
+        self._logger.register_key('Metrics/EpRetStd')
+        self._logger.register_key('Metrics/EpCostStd')
+        self._logger.register_key('Metrics/EpLenStd')
+        self._logger.register_key('Metrics/EpRetMin')
+        self._logger.register_key('Metrics/EpRetMax')
+        self._logger.register_key('Metrics/EpCostMin')
+        self._logger.register_key('Metrics/EpCostMax')
+        self._logger.register_key('Metrics/EpLenMin')
+        self._logger.register_key('Metrics/EpLenMax')
+        self._logger.register_key('Metrics/EpViolationRate')
 
         self._logger.register_key('Train/Epoch')
         self._logger.register_key('Train/Entropy')
@@ -235,6 +262,9 @@ class PolicyGradient(BaseAlgo):
         for env_spec_key in self._env.env_spec_keys:
             self.logger.register_key(env_spec_key)
 
+        # Initialize constraint violation tracking
+        self._total_violations = 0
+
     def learn(self) -> tuple[float, float, float]:
         """This is main function for algorithm update.
 
@@ -263,6 +293,11 @@ class PolicyGradient(BaseAlgo):
                 logger=self._logger,
             )
             self._logger.store({'Time/Rollout': time.time() - rollout_time})
+            
+            # Log epoch-level statistics across all episodes
+            self._env.log_epoch_statistics(self._logger)
+
+
 
             update_time = time.time()
             self._update()
@@ -586,3 +621,5 @@ class PolicyGradient(BaseAlgo):
             },
         )
         return loss
+
+

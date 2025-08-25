@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import torch
 
 from omnisafe.adapter.online_adapter import OnlineAdapter
@@ -49,6 +50,8 @@ class OffPolicyAdapter(OnlineAdapter):
     _ep_ret: torch.Tensor
     _ep_cost: torch.Tensor
     _ep_len: torch.Tensor
+    _total_violations: int
+    _epoch_episode_data: dict[str, list]
 
     def __init__(  # pylint: disable=too-many-arguments
         self,
@@ -61,6 +64,8 @@ class OffPolicyAdapter(OnlineAdapter):
         super().__init__(env_id, num_envs, seed, cfgs)
         self._current_obs, _ = self.reset()
         self._max_ep_len: int = 1000
+        self._total_violations = 0
+        self._epoch_episode_data = {'ep_ret': [], 'ep_cost': [], 'ep_len': [], 'ep_violations': []}
         self._reset_log()
 
     def eval_policy(  # pylint: disable=too-many-locals
@@ -174,21 +179,81 @@ class OffPolicyAdapter(OnlineAdapter):
         self._ep_len += 1
 
     def _log_metrics(self, logger: Logger, idx: int) -> None:
-        """Log metrics, including ``EpRet``, ``EpCost``, ``EpLen``.
+        """Log metrics, including ``EpRet``, ``EpCost``, ``EpLen``, and violations.
 
         Args:
-            logger (Logger): Logger, to log ``EpRet``, ``EpCost``, ``EpLen``.
+            logger (Logger): Logger, to log ``EpRet``, ``EpCost``, ``EpLen``, and violations.
             idx (int): The index of the environment.
         """
         if hasattr(self._env, 'spec_log'):
             self._env.spec_log(logger)
-        logger.store(
-            {
-                'Metrics/EpRet': self._ep_ret[idx],
-                'Metrics/EpCost': self._ep_cost[idx],
-                'Metrics/EpLen': self._ep_len[idx],
-            },
-        )
+        
+        # Check if this episode violated the cost limit
+        episode_cost = self._ep_cost[idx]
+        try:
+            cost_limit = self._cfgs.lagrange_cfgs.cost_limit
+        except:
+            cost_limit = self._cfgs.algo_cfgs.cost_limit
+        episode_violated = episode_cost > cost_limit
+        
+        # Update total violations count
+        if episode_violated:
+            self._total_violations += 1
+        
+        # Collect episode data for epoch-level statistics
+        self._epoch_episode_data['ep_ret'].append(self._ep_ret[idx].item())
+        self._epoch_episode_data['ep_cost'].append(self._ep_cost[idx].item())
+        self._epoch_episode_data['ep_len'].append(self._ep_len[idx].item())
+        self._epoch_episode_data['ep_violations'].append(1.0 if episode_violated else 0.0)
+        
+        # Store individual episode violation for immediate logging
+        logger.store({
+            'Metrics/EpViolation': 1.0 if episode_violated else 0.0,
+            'Metrics/TotalViolation': self._total_violations,
+        })
+    
+    def log_epoch_statistics(self, logger: Logger) -> None:
+        """Log epoch-level statistics across all episodes in the epoch.
+        
+        This method calculates min, max, mean, and std across all episodes
+        collected during the epoch and stores them in the logger.
+        
+        Args:
+            logger (Logger): Logger to store the statistics.
+        """
+        if not self._epoch_episode_data['ep_ret']:
+            return  # No episodes collected
+        
+        # Calculate statistics for episode returns
+        ep_ret_array = np.array(self._epoch_episode_data['ep_ret'])
+        ep_cost_array = np.array(self._epoch_episode_data['ep_cost'])
+        ep_len_array = np.array(self._epoch_episode_data['ep_len'])
+        ep_violations_array = np.array(self._epoch_episode_data['ep_violations'])
+        
+        # Store epoch-level statistics
+        logger.store({
+            'Metrics/EpRet': ep_ret_array.mean(),
+            'Metrics/EpCost': ep_cost_array.mean(),
+            'Metrics/EpLen': ep_len_array.mean(),
+        })
+        
+        # Store additional statistics if we have multiple episodes
+        if len(ep_ret_array) > 1:
+            logger.store({
+                'Metrics/EpRetStd': ep_ret_array.std(),
+                'Metrics/EpCostStd': ep_cost_array.std(),
+                'Metrics/EpLenStd': ep_len_array.std(),
+                'Metrics/EpRetMin': ep_ret_array.min(),
+                'Metrics/EpRetMax': ep_ret_array.max(),
+                'Metrics/EpCostMin': ep_cost_array.min(),
+                'Metrics/EpCostMax': ep_cost_array.max(),
+                'Metrics/EpLenMin': ep_len_array.min(),
+                'Metrics/EpLenMax': ep_len_array.max(),
+                'Metrics/EpViolationRate': ep_violations_array.mean(),
+            })
+        
+        # Reset episode data for next epoch
+        self._epoch_episode_data = {'ep_ret': [], 'ep_cost': [], 'ep_len': [], 'ep_violations': []}
 
     def _reset_log(self, idx: int | None = None) -> None:
         """Reset the episode return, episode cost and episode length.
