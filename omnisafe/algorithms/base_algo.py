@@ -52,7 +52,7 @@ class BaseAlgo(ABC):  # pylint: disable=too-few-public-methods
         except:
             pass
         try:
-            self._cfgs.lagrange_cfgs.cost_limit = self._cfgs.lagrange_cfgs.cost_limit
+            self._cfgs.lagrange_cfgs.cost_limit = self._cfgs.train_cfgs.cost_limit
         except:
             pass
     
@@ -62,13 +62,36 @@ class BaseAlgo(ABC):  # pylint: disable=too-few-public-methods
             pass
 
         try:
-            self._cfgs.lagrange_cfgs.pid_kp = self._cfgs.train_cfgs.cost_limit
-            self._cfgs.lagrange_cfgs.pid_kd = self._cfgs.train_cfgs.cost_limit
-            self._cfgs.lagrange_cfgs.pid_ki = self._cfgs.train_cfgs.cost_limit
-            self._cfgs.lagrange_cfgs.lagrangian_multiplier_init = self._cfgs.train_cfgs.lagrangian_multiplier_init
-            print("Lagrange Success")
+            if "pid_kp" in self._cfgs.lagrange_cfgs.keys():
+                self._cfgs.lagrange_cfgs.pid_kp = self._cfgs.train_cfgs.pid_kp
+                self._cfgs.lagrange_cfgs.pid_kd = self._cfgs.train_cfgs.pid_kd
+                self._cfgs.lagrange_cfgs.pid_ki = self._cfgs.train_cfgs.pid_ki
         except:
             pass
+
+        try:
+            if "lagrangian_multiplier_init" in self._cfgs.lagrange_cfgs.keys():
+                print("setup lagrangian_multiplier_init")
+                self._cfgs.lagrange_cfgs.lagrangian_multiplier_init = self._cfgs.train_cfgs.lagrangian_multiplier_init
+        except:
+            pass
+        # print("Lagrange Success")
+        try:
+            if "lambda_lr" in self._cfgs.lagrange_cfgs.keys():
+                self._cfgs.lagrange_cfgs.lambda_lr = self._cfgs.train_cfgs.lambda_lr
+        except:
+            pass
+        try:
+            if "lambda_optimizer" in self._cfgs.lagrange_cfgs.keys():
+                self._cfgs.lagrange_cfgs.lambda_optimizer = self._cfgs.train_cfgs.lambda_optimizer
+        except:
+            pass
+        try:
+            if "lagrangian_upper_bound" in self._cfgs.lagrange_cfgs.keys():
+                self._cfgs.lagrange_cfgs.lagrangian_upper_bound = self._cfgs.train_cfgs.lagrangian_upper_bound
+        except:
+            pass
+
         distributed.setup_distributed()
 
         self._init_env()

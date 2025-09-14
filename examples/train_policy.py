@@ -89,14 +89,14 @@ if __name__ == '__main__':
     parser.add_argument(
         '--unsafe-reward',
         type=float,
-        default=-1.0,
+        default=-0.2,
         metavar='THREADS',
         help='number of threads to use for torch',
     )
     parser.add_argument(
         '--saute-gamma',
         type=float,
-        default=0.999,
+        default=0.9999,
         metavar='THREADS',
         help='number of threads to use for torch',
     )
@@ -107,27 +107,6 @@ if __name__ == '__main__':
         metavar='THREADS',
         help='number of threads to use for torch',
     )
-    # parser.add_argument(
-    #     '--use-resets',
-    #     type=bool,
-    #     default=False,
-    #     metavar='RESETS',
-    #     help='whether to use resets',
-    # )
-    # parser.add_argument(
-    #     '--reset-freq',
-    #     type=int,
-    #     default=1000000,
-    #     metavar='RESET-FREQ',
-    #     help='reset frequency',
-    # )
-    # parser.add_argument(
-    #     '--eval-episodes',
-    #     type=int,
-    #     default=0,
-    #     metavar='EVAL EPISODES',
-    #     help='how frequently to evaluate the policy (0 means no evaluation only on training environment)',
-    # )
     parser.add_argument(
         '--pid-kp',
         type=float,
@@ -163,6 +142,28 @@ if __name__ == '__main__':
         metavar='STEPS PER EPOCH',
         help='how many steps to execute in each epoch',
     )
+    parser.add_argument(
+        '--lambda_lr',
+        type=float,
+        default=0.035,
+        metavar='LAMBDA LR',
+        help='learning rate of lagrangian multiplier',
+    )
+    parser.add_argument(
+        '--lambda_optimizer',
+        type=str,
+        default='Adam',
+        metavar='LAMBDA OPTIMIZER',
+        help='type of lagrangian optimizer',
+    )
+    parser.add_argument(
+        '--lagrangian_upper_bound',
+        type=float,
+        default=2.0,
+        metavar='LAMBDA UPPER BOUND',
+        help='upper bound of lagrangian multiplier',
+    )
+
     args, unparsed_args = parser.parse_known_args()
     unparsed_args = [x.replace("=", " ") for x in unparsed_args]
     unparsed_args = [y for x in unparsed_args for y in x.split()]

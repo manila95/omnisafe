@@ -28,6 +28,26 @@ defaults:
     parallel: 1
     # total number of steps to train
     total_steps: 10000000
+    cost_limit: 10.0
+    unsafe_reward: -1.0
+    saute_gamma: 0.999
+    distance: 2.0 
+    steps_per_epoch: 20000
+    pid_kp: 0.001
+    # The Ki of PID controller
+    pid_ki: 0.0000001
+    # The Kd of PID controller
+    pid_kd: 0.0000001
+    lagrangian_multiplier_init: 0.001
+    lagrangian_multiplier_init: 10.0
+    pid_kp: 0.0001
+    # Learning rate of lagrangian multiplier
+    lambda_lr: 0.035
+    # Type of lagrangian optimizer
+    lambda_optimizer: "Adam"
+    # The upper bound of lagrange multiplier
+    lagrangian_upper_bound: 2.0
+
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy
@@ -76,6 +96,27 @@ defaults:
     penalty_coef: 0.0
     # use cost
     use_cost: True
+    # SAM configurations
+    # use SAM for actor
+    use_sam_actor: False
+    # SAM type
+    sam_type: "v1"
+    # SAM rho
+    sam_rho: 0.05
+    # SAM target KL
+    perturbation_target_kl: 0.01
+    # SAM number of samples
+    sam_num_samples: 10
+    # SAM perturbation decay
+    perturbation_decay: False
+    # use SAM for reward critic
+    use_sam_reward_critic: False
+    # use SAM for cost critic
+    use_sam_cost_critic: False
+    # Use KL for SAM
+    use_kl: False
+    # SAM clip
+    sam_clip: 0.2
   # logger configurations
   logger_cfgs:
     # use wandb for logging
@@ -90,6 +131,23 @@ defaults:
     log_dir: "./runs"
     # save model path
     window_lens: 100
+  risk_cfgs:
+    # use risk model or not ? 
+    use_risk: False
+    # do we have a pretrained risk model ? 
+    risk_model_path: None
+    # do we update the the risk model ? 
+    fine_tune_risk: False
+    # what should be the quantile size of the risk distribution?
+    quantile_size: 4
+    # what should be the number of samples for the risk model?
+    quantile_num: 10 
+    # learning rate
+    risk_lr: 0.0001
+    # batch size
+    risk_batch_size: 128
+    # frequency of updating the risk model
+    risk_update_freq: 100
   # model configurations
   model_cfgs:
     # weight initialization mode

@@ -39,6 +39,7 @@ class PPO(PolicyGradient):
         act: torch.Tensor,
         logp: torch.Tensor,
         adv: torch.Tensor,
+        clip: float = 0.2,
     ) -> torch.Tensor:
         r"""Computing pi/actor loss.
 
@@ -71,8 +72,8 @@ class PPO(PolicyGradient):
         ratio = torch.exp(logp_ - logp)
         ratio_cliped = torch.clamp(
             ratio,
-            1 - self._cfgs.algo_cfgs.clip,
-            1 + self._cfgs.algo_cfgs.clip,
+            1 - clip,
+            1 + clip,
         )
         loss = -torch.min(ratio * adv, ratio_cliped * adv).mean()
         loss -= self._cfgs.algo_cfgs.entropy_coef * distribution.entropy().mean()

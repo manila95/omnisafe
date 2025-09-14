@@ -32,7 +32,12 @@ from omnisafe.common.buffer import VectorOnPolicyBuffer
 from omnisafe.common.logger import Logger
 from omnisafe.models.actor_critic.constraint_actor_critic import ConstraintActorCritic
 from omnisafe.utils import distributed
-
+from omnisafe.common.sam import actor_sam_fn
+from omnisafe.utils.tools import (
+    get_flat_gradients_from,
+    get_flat_params_from,
+    set_param_values_to_model,
+)
 
 @registry.register
 # pylint: disable-next=too-many-instance-attributes,too-few-public-methods,line-too-long
@@ -389,9 +394,15 @@ class PolicyGradient(BaseAlgo):
                 adv_r,
                 adv_c,
             ) in dataloader:
-                self._update_reward_critic(obs, risk_b, target_value_r)
+                if self._cfgs.algo_cfgs.use_sam_reward_critic:
+                    self._update_reward_critic_sam(obs, risk_b, target_value_r)
+                else:
+                    self._update_reward_critic(obs, risk_b, target_value_r)
                 if self._cfgs.algo_cfgs.use_cost:
-                    self._update_cost_critic(obs, risk_b, target_value_c)
+                    if self._cfgs.algo_cfgs.use_sam_cost_critic:
+                        self._update_cost_critic_sam(obs, risk_b, target_value_c)
+                    else:
+                        self._update_cost_critic(obs, risk_b, target_value_c)
                 self._update_actor(obs, risk_b, act, logp, adv_r, adv_c)
 
             new_distribution = self._actor_critic.actor(original_obs, risk)
@@ -500,6 +511,144 @@ class PolicyGradient(BaseAlgo):
 
         self._logger.store({'Loss/Loss_cost_critic': loss.mean().item()})
 
+
+    def _update_cost_critic_sam(self, obs: torch.Tensor, risk:torch.Tensor, target_value_c: torch.Tensor) -> None:
+        r"""Update value network under a double for loop.
+
+        The loss function is ``MSE loss``, which is defined in ``torch.nn.MSELoss``.
+        Specifically, the loss function is defined as:
+
+        .. math::
+
+            L = \frac{1}{N} \sum_{i=1}^N (\hat{V} - V)^2
+
+        where :math:`\hat{V}` is the predicted cost and :math:`V` is the target cost.
+
+        #. Compute the loss function.
+        #. Add the ``critic norm`` to the loss function if ``use_critic_norm`` is ``True``.
+        #. Clip the gradient if ``use_max_grad_norm`` is ``True``.
+        #. Update the network by loss function.
+
+        Args:
+            obs (torch.Tensor): The ``observation`` sampled from buffer.
+            target_value_c (torch.Tensor): The ``target_value_c`` sampled from buffer.
+        """
+        risk = risk if self._cfgs.risk_cfgs.use_risk else None
+        self._actor_critic.cost_critic_optimizer.zero_grad()
+        if self._cfgs.algo_cfgs.sam_type == "v4":
+            sam_grads_c, _ = compute_sam_gradients_critic_v4(
+                self._actor_critic.cost_critic, 
+                {"obs": obs, "risk": risk}, 
+                target_value_c,
+                rho=self._cfgs.algo_cfgs.sam_rho, 
+                num_samples=self._cfgs.algo_cfgs.sam_num_samples
+            )
+        else:
+            sam_grads_c, _, _, _, _ = compute_sam_gradients_critic(
+                self._actor_critic.cost_critic, 
+                {"obs": obs, "risk": risk}, 
+                target_value_c,
+                rho=self._cfgs.algo_cfgs.sam_rho)
+        for name, param in self._actor_critic.cost_critic.named_parameters():
+            if name in sam_grads_c:
+                param.grad = sam_grads_c[name]
+
+        if self._cfgs.algo_cfgs.use_critic_norm:
+            for param in self._actor_critic.cost_critic.parameters():
+                if param.grad is not None:
+                    param.grad += param * 0.001
+
+        if self._cfgs.algo_cfgs.use_max_grad_norm:
+            clip_grad_norm_(
+                self._actor_critic.cost_critic.parameters(),
+                self._cfgs.algo_cfgs.max_grad_norm,
+            )
+        self._logger.store({'Loss/Loss_cost_critic': nn.functional.mse_loss(self._actor_critic.cost_critic(obs, risk)[0], target_value_c).mean().item()})
+
+        distributed.avg_grads(self._actor_critic.cost_critic)
+        self._actor_critic.cost_critic_optimizer.step()
+
+
+    def _update_reward_critic_sam(self, obs: torch.Tensor, risk:torch.Tensor, target_value_r: torch.Tensor) -> None:
+        r"""Update value network under a double for loop.
+
+        The loss function is ``MSE loss``, which is defined in ``torch.nn.MSELoss``.
+        Specifically, the loss function is defined as:
+
+        .. math::
+
+            L = \frac{1}{N} \sum_{i=1}^N (\hat{V} - V)^2
+
+        where :math:`\hat{V}` is the predicted cost and :math:`V` is the target cost.
+
+        #. Compute the loss function.
+        #. Add the ``critic norm`` to the loss function if ``use_critic_norm`` is ``True``.
+        #. Clip the gradient if ``use_max_grad_norm`` is ``True``.
+        #. Update the network by loss function.
+
+        Args:
+            obs (torch.Tensor): The ``observation`` sampled from buffer.
+            target_value_c (torch.Tensor): The ``target_value_c`` sampled from buffer.
+        """
+        risk = risk if self._cfgs.risk_cfgs.use_risk else None
+        self._actor_critic.reward_critic_optimizer.zero_grad()
+        if self._cfgs.algo_cfgs.sam_type == "v4":
+            sam_grads_c, _ = compute_sam_gradients_critic_v4(
+                self._actor_critic.reward_critic, 
+                {"obs": obs, "risk": risk}, 
+                target_value_r,
+                rho=self._cfgs.algo_cfgs.sam_rho, 
+                num_samples=self._cfgs.algo_cfgs.sam_num_samples
+            )
+        else:
+            sam_grads_c, _, _, _, _ = compute_sam_gradients_critic(
+                self._actor_critic.reward_critic, 
+                {"obs": obs, "risk": risk}, 
+                target_value_r,
+                rho=self._cfgs.algo_cfgs.sam_rho)
+        for name, param in self._actor_critic.reward_critic.named_parameters():
+            if name in sam_grads_c:
+                param.grad = sam_grads_c[name]
+
+        if self._cfgs.algo_cfgs.use_critic_norm:
+            for param in self._actor_critic.reward_critic.parameters():
+                if param.grad is not None:
+                    param.grad += param * 0.001
+
+        if self._cfgs.algo_cfgs.use_max_grad_norm:
+            clip_grad_norm_(
+                self._actor_critic.reward_critic.parameters(),
+                self._cfgs.algo_cfgs.max_grad_norm,
+            )
+        self._logger.store({'Loss/Loss_cost_critic': nn.functional.mse_loss(self._actor_critic.reward_critic(obs, risk)[0], target_value_c).mean().item()})
+
+        distributed.avg_grads(self._actor_critic.reward_critic)
+        self._actor_critic.reward_critic_optimizer.step()
+
+    def _update_actor_sam(self, obs: torch.Tensor, risk: torch.Tensor, act: torch.Tensor, logp: torch.Tensor, adv: torch.Tensor, rho: float, clip: float) -> None:
+        loss = self._loss_pi(obs, risk, act, logp, adv, clip=clip)
+        loss.backward(retain_graph=True)
+        grads = get_flat_gradients_from(self._actor_critic.actor)
+        grad_norm = torch.norm(grads)
+        
+        scale = rho / (grad_norm + 1e-12)
+        perturbed_params = []
+        for param in self._actor_critic.actor.parameters():
+            if param.grad is None:
+                continue
+            e_w = param.grad * scale.to(param)
+            perturbed_params.append(e_w)
+            param.data.add_(e_w)
+        self._actor_critic.actor.zero_grad()
+        loss = self._loss_pi(obs, risk, act, logp, adv, clip=self._cfgs.algo_cfgs.clip)
+        loss.backward()
+        grads = get_flat_gradients_from(self._actor_critic.actor)
+        for param, e_w in zip(self._actor_critic.actor.parameters(), perturbed_params):
+            if param.grad is None:
+                continue
+            param.data.sub_(e_w)
+        return loss
+
     def _update_actor(  # pylint: disable=too-many-arguments
         self,
         obs: torch.Tensor,
@@ -528,11 +677,26 @@ class PolicyGradient(BaseAlgo):
             adv_r (torch.Tensor): The ``reward_advantage`` sampled from buffer.
             adv_c (torch.Tensor): The ``cost_advantage`` sampled from buffer.
         """
+
+        data = {}
+        data["obs"] = obs
+        data["risk"] = risk
+        data["act"] = act
+        data["logp"] = logp
+        data["adv_r"] = adv_r
+        data["adv_c"] = adv_c
+        data["log_prob"] = logp
+        # data["fvp_obs"] = self._fvp_obs
+        # data["fvp_risk"] = self._fvp_risk        
         risk = risk if self._cfgs.risk_cfgs.use_risk else None
         adv = self._compute_adv_surrogate(adv_r, adv_c)
-        loss = self._loss_pi(obs, risk, act, logp, adv)
-        self._actor_critic.actor_optimizer.zero_grad()
-        loss.backward()
+        if self._cfgs.algo_cfgs.use_sam_actor:
+            loss = self._update_actor_sam(obs, risk, act, logp, adv, rho=self._cfgs.algo_cfgs.sam_rho, clip=self._cfgs.algo_cfgs.sam_clip)
+        else:
+            loss = self._loss_pi(obs, risk, act, logp, adv)
+            self._actor_critic.actor_optimizer.zero_grad()
+            loss.backward()
+            
         if self._cfgs.algo_cfgs.use_max_grad_norm:
             clip_grad_norm_(
                 self._actor_critic.actor.parameters(),

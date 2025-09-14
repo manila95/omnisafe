@@ -25,7 +25,11 @@ from omnisafe.algorithms.on_policy.base.ppo import PPO
 from omnisafe.common.lagrange import Lagrange
 from omnisafe.utils import distributed
 
-
+from omnisafe.utils.tools import (
+    get_flat_gradients_from,
+    get_flat_params_from,
+    set_param_values_to_model,
+)
 @registry.register
 class CUP(PPO):
     """The Constrained Update Projection (CUP) Approach to Safe Policy Optimization.
@@ -129,6 +133,35 @@ class CUP(PPO):
         )
         return loss
 
+    def _update_actor_sam_cost(self, obs: torch.Tensor, act: torch.Tensor, logp: torch.Tensor, adv_c: torch.Tensor, rho: float = 0.05) -> None:
+        loss_cost = self._loss_pi_cost(obs, act, logp, adv_c)
+        loss_cost.backward(retain_graph=True)
+        grads = get_flat_gradients_from(self._actor_critic.actor)
+        grad_norm = torch.norm(grads)
+        
+        # Compute perturbation
+        scale = rho / (grad_norm + 1e-12)
+        perturbed_params = []
+        for param in self._actor_critic.actor.parameters():
+            if param.grad is None:
+                continue
+            e_w = param.grad * scale.to(param)
+            perturbed_params.append(e_w)
+            param.data.add_(e_w)
+
+        self._actor_critic.actor.zero_grad()
+        loss_cost = self._loss_pi_cost(obs, act, logp, adv_c)
+        loss_cost.backward()
+        grads = get_flat_gradients_from(self._actor_critic.actor)
+        for param, e_w in zip(self._actor_critic.actor.parameters(), perturbed_params):
+            if param.grad is None:
+                continue
+            param.data.sub_(e_w)
+
+        self._actor_critic.actor_optimizer.step()
+
+        return loss_cost
+
     def _update(self) -> None:
         r"""Update actor, critic, and Lagrange multiplier parameters.
 
@@ -167,9 +200,15 @@ class CUP(PPO):
         for i in track(range(self._cfgs.algo_cfgs.update_iters), description='Updating...'):
             for obs, act, logp, adv_c, old_mean, old_std in dataloader:
                 self._p_dist = Normal(old_mean, old_std)
-                loss_cost = self._loss_pi_cost(obs, act, logp, adv_c)
-                self._actor_critic.actor_optimizer.zero_grad()
-                loss_cost.backward()
+                if self._cfgs.algo_cfgs.use_sam_actor:
+                    loss_cost = self._loss_pi_cost(obs, act, logp, adv_c)
+                    loss_cost.backward(retain_graph=True)
+
+                    loss_cost = self._update_actor_sam_cost(obs, act, logp, adv_c)
+                else:
+                    loss_cost = self._loss_pi_cost(obs, act, logp, adv_c)
+                    self._actor_critic.actor_optimizer.zero_grad()
+                    loss_cost.backward()
                 if self._cfgs.algo_cfgs.max_grad_norm is not None:
                     clip_grad_norm_(
                         self._actor_critic.actor.parameters(),

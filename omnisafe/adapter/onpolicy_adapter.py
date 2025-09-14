@@ -27,8 +27,8 @@ from omnisafe.common.logger import Logger
 from omnisafe.models.actor_critic.constraint_actor_critic import ConstraintActorCritic
 from omnisafe.utils.config import Config
 
-from src.models.risk_models import * 
-from src.utils import * 
+# from src.models.risk_models import * 
+# from src.utils import * 
 
 class OnPolicyAdapter(OnlineAdapter):
     """OnPolicy Adapter for OmniSafe.

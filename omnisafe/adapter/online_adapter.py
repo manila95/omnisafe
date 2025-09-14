@@ -35,8 +35,8 @@ from omnisafe.utils.config import Config
 from omnisafe.common.logger import Logger
 
 from omnisafe.utils.tools import get_device
-from src.utils import *
-from src.models.risk_models import *
+# from src.utils import *
+# from src.models.risk_models import *
 
 class OnlineAdapter:
     """Online Adapter for OmniSafe.

@@ -28,6 +28,7 @@ from omnisafe.utils.tools import (
     get_flat_params_from,
     set_param_values_to_model,
 )
+from omnisafe.common.sam import actor_sam_fn
 
 
 @registry.register
@@ -178,6 +179,17 @@ class TRPO(NaturalPG):
         risk = risk if self._cfgs.risk_cfgs.use_risk else None
         self._fvp_obs = obs[:: self._cfgs.algo_cfgs.fvp_sample_freq]
         self._fvp_risk = risk[:: self._cfgs.algo_cfgs.fvp_sample_freq] if risk is not None else None
+        data = {}
+        data["obs"] = obs
+        data["risk"] = risk
+        data["act"] = act
+        data["logp"] = logp
+        data["adv_r"] = adv_r
+        data["adv_c"] = adv_c
+        data["log_prob"] = logp
+        data["fvp_obs"] = self._fvp_obs
+        data["fvp_risk"] = self._fvp_risk
+
         theta_old = get_flat_params_from(self._actor_critic.actor)
         self._actor_critic.actor.zero_grad()
         adv = self._compute_adv_surrogate(adv_r, adv_c)
@@ -185,10 +197,20 @@ class TRPO(NaturalPG):
         loss_before = distributed.dist_avg(loss)
         p_dist = self._actor_critic.actor(obs, risk)
 
-        loss.backward()
-        distributed.avg_grads(self._actor_critic.actor)
+        if self._cfgs.algo_cfgs.use_sam_actor:
+            sam_grads, perturbed_params, cos_sim, effective_rho, scale_along_grad = actor_sam_fn(self._cfgs.algo_cfgs.sam_type, self._cfgs.algo_cfgs.use_kl)(
+                self._fvp, self._actor_critic, data, adv, adv_c, adv_r,
+                rho=self._cfgs.algo_cfgs.sam_rho,
+                target_kl=self._cfgs.algo_cfgs.perturbation_target_kl,
+                num_samples=self._cfgs.algo_cfgs.sam_num_samples,
+            )
+            grads = -sam_grads
+        else:
+            loss.backward()
+            distributed.avg_grads(self._actor_critic.actor)
 
-        grads = -get_flat_gradients_from(self._actor_critic.actor)
+            grads = -get_flat_gradients_from(self._actor_critic.actor)
+
         x = conjugate_gradients(self._fvp, grads, self._cfgs.algo_cfgs.cg_iters)
         assert torch.isfinite(x).all(), 'x is not finite'
         xHx = torch.dot(x, self._fvp(x))

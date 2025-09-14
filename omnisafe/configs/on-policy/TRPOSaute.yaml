@@ -103,6 +103,25 @@ defaults:
     max_ep_len: 1000
     # The reward when the agent is unsafe
     unsafe_reward: -1.0
+    # SAM configurations
+    # use SAM for actor
+    use_sam_actor: False
+    # SAM type
+    sam_type: "v1"
+    # SAM rho
+    sam_rho: 0.05
+    # SAM target KL
+    perturbation_target_kl: 0.01
+    # SAM number of samples
+    sam_num_samples: 10
+    # SAM perturbation decay
+    perturbation_decay: False
+    # use SAM for reward critic
+    use_sam_reward_critic: False
+    # use SAM for cost critic
+    use_sam_cost_critic: False
+    # Use KL for SAM
+    use_kl: False
   # logger configurations
   logger_cfgs:
     # use wandb for logging
