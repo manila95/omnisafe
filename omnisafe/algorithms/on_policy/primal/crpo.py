@@ -15,7 +15,7 @@
 """Implementation of the on-policy CRPO algorithm."""
 
 import torch
-
+import numpy as np
 from omnisafe.algorithms import registry
 from omnisafe.algorithms.on_policy.base.trpo import TRPO
 from omnisafe.utils.config import Config
@@ -66,7 +66,7 @@ class OnCRPO(TRPO):
         Returns:
             The advantage function chosen from reward and cost.
         """
-        Jc = self._logger.get_stats('Metrics/EpCost')[0]
+        Jc = np.mean(self._logger.get_stats('Metrics/EpCost'))
         if Jc <= self._cfgs.algo_cfgs.cost_limit + self._cfgs.algo_cfgs.distance:
             self._rew_update += 1
             return adv_r

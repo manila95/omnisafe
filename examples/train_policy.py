@@ -61,14 +61,14 @@ if __name__ == '__main__':
     parser.add_argument(
         '--vector-env-nums',
         type=int,
-        default=1,
+        default=5,
         metavar='VECTOR-ENV',
         help='number of vector envs to use for training',
     )
     parser.add_argument(
         '--torch-threads',
         type=int,
-        default=16,
+        default=8,
         metavar='THREADS',
         help='number of threads to use for torch',
     )
@@ -143,21 +143,21 @@ if __name__ == '__main__':
         help='how many steps to execute in each epoch',
     )
     parser.add_argument(
-        '--lambda_lr',
+        '--lambda-lr',
         type=float,
         default=0.035,
         metavar='LAMBDA LR',
         help='learning rate of lagrangian multiplier',
     )
     parser.add_argument(
-        '--lambda_optimizer',
+        '--lambda-optimizer',
         type=str,
         default='Adam',
         metavar='LAMBDA OPTIMIZER',
         help='type of lagrangian optimizer',
     )
     parser.add_argument(
-        '--lagrangian_upper_bound',
+        '--lagrangian-upper-bound',
         type=float,
         default=2.0,
         metavar='LAMBDA UPPER BOUND',

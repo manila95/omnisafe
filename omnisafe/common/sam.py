@@ -220,7 +220,7 @@ def compute_sam_gradients_critic(critic, data, target_values, rho=0.05, num_samp
     
     # First compute the base loss and gradients
     critic.zero_grad()
-    value_pred = critic(data["obs"], data["risk"])
+    value_pred = critic(data["obs"], data["risk"])[0]
     base_loss = nn.functional.mse_loss(value_pred, target_values)
     
     # Compute gradients
@@ -245,7 +245,7 @@ def compute_sam_gradients_critic(critic, data, target_values, rho=0.05, num_samp
     
     # Compute loss and gradients at perturbed point
     critic.zero_grad()
-    value_pred = critic(data["obs"], data["risk"])
+    value_pred = critic(data["obs"], data["risk"])[0]
     perturbed_loss = nn.functional.mse_loss(value_pred, target_values)
     perturbed_loss.backward()
     

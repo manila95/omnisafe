@@ -37,6 +37,11 @@ defaults:
     pid_kp: 0.0001
     pid_ki: 0.00001
     pid_kd: 0.0001
+    lambda_lr: 0.035
+    # Type of lagrangian optimizer
+    lambda_optimizer: "Adam"
+    # The upper bound of lagrange multiplier
+    lagrangian_upper_bound: 2.0
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy
@@ -93,6 +98,23 @@ defaults:
     fvp_obs: None
     # The sub-sampling rate of the observation
     fvp_sample_freq: 1
+    use_sam_actor: False
+    # SAM type
+    sam_type: "v1"
+    # SAM rho
+    sam_rho: 0.05
+    # SAM target KL
+    perturbation_target_kl: 0.01
+    # SAM number of samples
+    sam_num_samples: 10
+    # SAM perturbation decay
+    perturbation_decay: False
+    # use SAM for reward critic
+    use_sam_reward_critic: False
+    # use SAM for cost critic
+    use_sam_cost_critic: False
+    # Use KL for SAM
+    use_kl: False
   # logger configurations
   logger_cfgs:
     # use wandb for logging

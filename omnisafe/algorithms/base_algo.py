@@ -35,6 +35,7 @@ class BaseAlgo(ABC):  # pylint: disable=too-few-public-methods
         """Initialize an instance of algorithm."""
         self._env_id: str = env_id
         self._cfgs: Config = cfgs
+        self._epoch: int = 0
 
         assert hasattr(cfgs, 'seed'), 'Please specify the seed in the config file.'
         self._seed: int = int(cfgs.seed) + distributed.get_rank() * 1000

@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import torch
 from torch.distributions import Distribution
 
@@ -28,7 +29,7 @@ from omnisafe.utils.tools import (
     get_flat_params_from,
     set_param_values_to_model,
 )
-from omnisafe.common.sam import actor_sam_fn
+from omnisafe.common.sam import *
 
 
 @registry.register
@@ -196,12 +197,13 @@ class TRPO(NaturalPG):
         loss = self._loss_pi(obs, risk, act, logp, adv)
         loss_before = distributed.dist_avg(loss)
         p_dist = self._actor_critic.actor(obs, risk)
+        
 
         if self._cfgs.algo_cfgs.use_sam_actor:
             sam_grads, perturbed_params, cos_sim, effective_rho, scale_along_grad = actor_sam_fn(self._cfgs.algo_cfgs.sam_type, self._cfgs.algo_cfgs.use_kl)(
                 self._fvp, self._actor_critic, data, adv, adv_c, adv_r,
                 rho=self._cfgs.algo_cfgs.sam_rho,
-                target_kl=self._cfgs.algo_cfgs.perturbation_target_kl,
+                target_kl=self._cfgs.algo_cfgs.perturbation_target_kl / np.sqrt(self._epoch + 1) if self._cfgs.algo_cfgs.perturbation_decay else self._cfgs.algo_cfgs.perturbation_target_kl,
                 num_samples=self._cfgs.algo_cfgs.sam_num_samples,
             )
             grads = -sam_grads

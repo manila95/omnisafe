@@ -32,12 +32,13 @@ from omnisafe.common.buffer import VectorOnPolicyBuffer
 from omnisafe.common.logger import Logger
 from omnisafe.models.actor_critic.constraint_actor_critic import ConstraintActorCritic
 from omnisafe.utils import distributed
-from omnisafe.common.sam import actor_sam_fn
+from omnisafe.common.sam import *
 from omnisafe.utils.tools import (
     get_flat_gradients_from,
     get_flat_params_from,
     set_param_values_to_model,
 )
+
 
 @registry.register
 # pylint: disable-next=too-many-instance-attributes,too-few-public-methods,line-too-long
@@ -197,7 +198,7 @@ class PolicyGradient(BaseAlgo):
 
         self._logger.register_key(
             'Metrics/EpRet',
-            window_length=self._cfgs.logger_cfgs.window_lens,
+            min_and_max=True,
         )
         self._logger.register_key(
             'Metrics/TotalCost',
@@ -207,7 +208,7 @@ class PolicyGradient(BaseAlgo):
         )
         self._logger.register_key(
             'Metrics/EpCost',
-            window_length=self._cfgs.logger_cfgs.window_lens,
+            min_and_max=True,
         )
         self._logger.register_key(
             'Metrics/EpLen',
@@ -270,7 +271,7 @@ class PolicyGradient(BaseAlgo):
 
         for epoch in range(self._cfgs.train_cfgs.epochs):
             epoch_time = time.time()
-
+            self._epoch = epoch
             rollout_time = time.time()
             self._env.rollout(
                 steps_per_epoch=self._steps_per_epoch,
@@ -620,7 +621,7 @@ class PolicyGradient(BaseAlgo):
                 self._actor_critic.reward_critic.parameters(),
                 self._cfgs.algo_cfgs.max_grad_norm,
             )
-        self._logger.store({'Loss/Loss_cost_critic': nn.functional.mse_loss(self._actor_critic.reward_critic(obs, risk)[0], target_value_c).mean().item()})
+        self._logger.store({'Loss/Loss_cost_critic': nn.functional.mse_loss(self._actor_critic.reward_critic(obs, risk)[0], target_value_r).mean().item()})
 
         distributed.avg_grads(self._actor_critic.reward_critic)
         self._actor_critic.reward_critic_optimizer.step()
