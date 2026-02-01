@@ -137,7 +137,7 @@ defaults:
     # Whether to normalize the derivate of the cost.
     diff_norm: False
     # Tolerance of constraint violation
-    cost_limit: 25.0
+    cost_limit: 10.0
     # The max penalty coefficient
     penalty_max: 100.0
     # Initial value of lagrangian multiplier

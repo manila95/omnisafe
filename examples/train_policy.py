@@ -72,18 +72,32 @@ if __name__ == '__main__':
         metavar='THREADS',
         help='number of threads to use for torch',
     )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=42,
+        metavar='THREADS',
+        help='number of threads to use for torch',
+    )
+
     args, unparsed_args = parser.parse_known_args()
     keys = [k[2:] for k in unparsed_args[0::2]]
     values = list(unparsed_args[1::2])
     unparsed_args = dict(zip(keys, values))
-
+    seed = args.seed 
+    # Storing the arguments in a dictionary
+    opt = vars(args)
+    # Removing the seed argument to avoid anything from breaking
+    del opt["seed"]
     custom_cfgs = {}
     for k, v in unparsed_args.items():
         update_dict(custom_cfgs, custom_cfgs_to_dict(k, v))
 
+
     agent = omnisafe.Agent(
         args.algo,
         args.env_id,
+        seed,
         train_terminal_cfgs=vars(args),
         custom_cfgs=custom_cfgs,
     )

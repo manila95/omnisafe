@@ -121,7 +121,7 @@ defaults:
   # lagrangian configurations
   lagrange_cfgs:
     # Tolerance of constraint violation
-    cost_limit: 25.0
+    cost_limit: 10.0
     # Initial value of lagrangian multiplier
     lagrangian_multiplier_init: 0.001
     # Learning rate of lagrangian multiplier
