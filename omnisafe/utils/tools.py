@@ -218,6 +218,51 @@ def update_dict(total_dict: dict[str, Any], item_dict: dict[str, Any]) -> None:
             total_dict.update({idd: total_value})
 
 
+def flat_config_to_nested(
+    flat: dict[str, Any],
+    omit_keys: tuple[str, ...] = ('algo', 'env_id', 'seed'),
+) -> dict[str, Any]:
+    """Convert a flat config with dotted keys into a nested dict for OmniSafe custom_cfgs.
+
+    Intended for use with wandb sweeps: wandb.config often has flat keys like
+    ``lagrange_cfgs.cost_limit``. This builds ``{'lagrange_cfgs': {'cost_limit': value}}``
+    so it can be passed as ``custom_cfgs`` to ``Agent(..., custom_cfgs=...)``.
+
+    Args:
+        flat: Flat dict, e.g. from ``wandb.config`` (keys may use dots for nesting).
+        omit_keys: Top-level keys to skip (they are passed to Agent separately).
+
+    Returns:
+        Nested dict suitable for ``custom_cfgs``.
+
+    Examples:
+        >>> flat_config_to_nested({'lagrange_cfgs.cost_limit': 15.0, 'algo': 'SACPID'})
+        {'lagrange_cfgs': {'cost_limit': 15.0}}
+    """
+    result: dict[str, Any] = {}
+    for key, value in flat.items():
+        if key in omit_keys:
+            continue
+        if '.' not in key:
+            continue
+        parts = key.replace('-', '_').split('.')
+        # Coerce string values like custom_cfgs_to_dict (wandb may pass str or number)
+        if isinstance(value, str):
+            if value == 'True':
+                value = True
+            elif value == 'False':
+                value = False
+            elif value.isdigit():
+                value = int(value)
+            elif '.' in value and value.replace('.', '', 1).isdigit():
+                value = float(value)
+        inner: dict[str, Any] = {parts[-1]: value}
+        for p in reversed(parts[:-1]):
+            inner = {p: inner}
+        update_dict(result, inner)
+    return result
+
+
 def load_yaml(path: str) -> dict[str, Any]:
     """Get the default kwargs from ``yaml`` file.
 

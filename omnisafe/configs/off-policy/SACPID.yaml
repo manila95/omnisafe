@@ -29,7 +29,7 @@ defaults:
     # total number of steps to train
     total_steps: 1000000
     # number of evaluate episodes
-    eval_episodes: 1
+    eval_episodes: 0
   # algorithm configurations
   algo_cfgs:
     # number of steps to update the policy
