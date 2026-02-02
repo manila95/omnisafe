@@ -29,7 +29,7 @@ from omnisafe.evaluator import Evaluator
 from omnisafe.utils import distributed
 from omnisafe.utils.config import Config, check_all_configs, get_default_kwargs_yaml
 from omnisafe.utils.plotter import Plotter
-from omnisafe.utils.tools import recursive_check_config
+from omnisafe.utils.tools import filter_custom_cfgs, recursive_check_config
 
 
 class AlgoWrapper:
@@ -109,12 +109,14 @@ class AlgoWrapper:
                 self.custom_cfgs.pop('env_id')
             if 'algo' in self.custom_cfgs:
                 self.custom_cfgs.pop('algo')
+            # keep only keys that exist in this algorithm's default config; drop malformed keys (e.g. containing '=')
+            custom_filtered = filter_custom_cfgs(self.custom_cfgs, cfgs)
             # validate the keys of custom configuration
-            recursive_check_config(self.custom_cfgs, cfgs)
+            recursive_check_config(custom_filtered, cfgs)
             # update the cfgs from custom configurations
-            cfgs.recurisve_update(self.custom_cfgs)
+            cfgs.recurisve_update(custom_filtered)
             # save configurations specified in current experiment
-            cfgs.update({'exp_increment_cfgs': self.custom_cfgs})
+            cfgs.update({'exp_increment_cfgs': custom_filtered})
         # update the cfgs from custom terminal configurations
         if self.train_terminal_cfgs:
             # avoid repeatedly record the env_id and algo

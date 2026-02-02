@@ -218,6 +218,38 @@ def update_dict(total_dict: dict[str, Any], item_dict: dict[str, Any]) -> None:
             total_dict.update({idd: total_value})
 
 
+def flatten_dict_to_dot(
+    d: dict[str, Any],
+    prefix: str = '',
+    skip_keys_with_eq: bool = True,
+) -> dict[str, Any]:
+    """Flatten nested dict into dot-separated keys (for wandb sweep config).
+
+    When wandb gives nested config (e.g. {"algo_cfgs": {"warmup_epochs": 500}}),
+    this produces {"algo_cfgs.warmup_epochs": 500} so flat_config_to_nested can use it.
+    Keys containing '=' are skipped so malformed sweep keys (e.g. "warmup_epochs=500")
+    are dropped.
+
+    Args:
+        d: Nested or flat dict (e.g. from wandb.config).
+        prefix: Current key prefix (used recursively).
+        skip_keys_with_eq: If True, skip keys that contain '='.
+
+    Returns:
+        Flat dict with dot keys.
+    """
+    out: dict[str, Any] = {}
+    for k, v in d.items():
+        if skip_keys_with_eq and '=' in str(k):
+            continue
+        key = f'{prefix}.{k}' if prefix else k
+        if isinstance(v, dict) and v:
+            out.update(flatten_dict_to_dot(v, key, skip_keys_with_eq))
+        else:
+            out[key] = v
+    return out
+
+
 def flat_config_to_nested(
     flat: dict[str, Any],
     omit_keys: tuple[str, ...] = ('algo', 'env_id', 'seed'),
@@ -244,6 +276,8 @@ def flat_config_to_nested(
         if key in omit_keys:
             continue
         if '.' not in key:
+            continue
+        if '=' in str(key):
             continue
         parts = key.replace('-', '_').split('.')
         # Coerce string values like custom_cfgs_to_dict (wandb may pass str or number)
@@ -286,6 +320,43 @@ def load_yaml(path: str) -> dict[str, Any]:
             raise FileNotFoundError(f'{path} error: {exc}') from exc
 
     return kwargs
+
+
+def filter_custom_cfgs(
+    custom_cfgs: dict[str, Any],
+    default_cfgs: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep only custom_cfgs keys that exist in default_cfgs (recursively).
+
+    Keys in custom_cfgs that are not in default_cfgs (e.g. lagrange_cfgs for SAC)
+    or that look malformed (e.g. contain '=') are dropped.
+
+    Args:
+        custom_cfgs: User overrides.
+        default_cfgs: Algorithm default config (dict-like).
+
+    Returns:
+        Filtered dict suitable for recursive_check_config and merge.
+    """
+    result: dict[str, Any] = {}
+    for key in custom_cfgs:
+        if '=' in str(key):
+            continue
+        if key not in default_cfgs:
+            continue
+        val = custom_cfgs[key]
+        default_val = default_cfgs[key]
+        if (
+            isinstance(val, dict)
+            and isinstance(default_val, dict)
+            and key != 'env_cfgs'
+        ):
+            filtered = filter_custom_cfgs(val, default_val)
+            if filtered:
+                result[key] = filtered
+        else:
+            result[key] = val
+    return result
 
 
 def recursive_check_config(

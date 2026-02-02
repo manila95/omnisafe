@@ -29,7 +29,7 @@ from __future__ import annotations
 import argparse
 
 import omnisafe
-from omnisafe.utils.tools import flat_config_to_nested
+from omnisafe.utils.tools import flat_config_to_nested, flatten_dict_to_dot
 
 try:
     import wandb
@@ -50,10 +50,15 @@ if __name__ == '__main__':
 
     # Start from sweep config (if any), then override with CLI
     run = wandb.init()
-    config = dict(wandb.config)
-
+    # Normalize wandb.config: skip keys with '=', flatten nested dicts to dot keys, map env -> env_id
+    raw = dict(wandb.config)
+    config_flat = flatten_dict_to_dot(
+        {k: v for k, v in raw.items() if '=' not in str(k)},
+        skip_keys_with_eq=True,
+    )
+    config = dict(config_flat)
     config['algo'] = getattr(args, 'algo', config.get('algo', 'SACPID'))
-    config['env_id'] = getattr(args, 'env_id', config.get('env_id', 'SafetyPointGoal1-v0'))
+    config['env_id'] = getattr(args, 'env_id', config.get('env_id') or config.get('env', 'SafetyPointGoal1-v0'))
     config['seed'] = getattr(args, 'seed', config.get('seed', 42))
     config['total_steps'] = getattr(args, 'total_steps', config.get('total_steps', 1000000))
     config['device'] = getattr(args, 'device', config.get('device', 'cpu'))
