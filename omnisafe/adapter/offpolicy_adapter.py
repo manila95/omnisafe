@@ -61,6 +61,7 @@ class OffPolicyAdapter(OnlineAdapter):
         super().__init__(env_id, num_envs, seed, cfgs)
         self._current_obs, _ = self.reset()
         self._max_ep_len: int = 1000
+        self._total_cost: float = 0.0
         self._reset_log()
 
     def eval_policy(  # pylint: disable=too-many-locals
@@ -174,19 +175,22 @@ class OffPolicyAdapter(OnlineAdapter):
         self._ep_len += 1
 
     def _log_metrics(self, logger: Logger, idx: int) -> None:
-        """Log metrics, including ``EpRet``, ``EpCost``, ``EpLen``.
+        """Log metrics, including ``EpRet``, ``EpCost``, ``EpLen``, ``TotalCost``.
 
         Args:
-            logger (Logger): Logger, to log ``EpRet``, ``EpCost``, ``EpLen``.
+            logger (Logger): Logger, to log ``EpRet``, ``EpCost``, ``EpLen``, ``TotalCost``.
             idx (int): The index of the environment.
         """
         if hasattr(self._env, 'spec_log'):
             self._env.spec_log(logger)
+        ep_cost_val = float(self._ep_cost[idx].cpu().item())
+        self._total_cost += ep_cost_val
         logger.store(
             {
                 'Metrics/EpRet': self._ep_ret[idx],
                 'Metrics/EpCost': self._ep_cost[idx],
                 'Metrics/EpLen': self._ep_len[idx],
+                'Metrics/TotalCost': self._total_cost,
             },
         )
 

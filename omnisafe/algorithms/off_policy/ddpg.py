@@ -209,6 +209,7 @@ class DDPG(BaseAlgo):
             'Metrics/EpLen',
             window_length=self._cfgs.logger_cfgs.window_lens,
         )
+        self._logger.register_key('Metrics/TotalCost')
 
         if self._cfgs.train_cfgs.eval_episodes > 0:
             self._logger.register_key(
