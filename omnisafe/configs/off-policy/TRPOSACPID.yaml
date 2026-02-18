@@ -1,0 +1,111 @@
+# Copyright 2023 OmniSafe Team. All Rights Reserved.
+#
+# TRPOSACPID: TRPOPID warmup + SACPID
+# Phase 1: TRPOPID (on-policy safe RL) for warmup_epochs
+# Phase 2: SACPID (off-policy)
+
+defaults:
+  seed: 0
+  train_cfgs:
+    device: cpu
+    torch_threads: 16
+    vector_env_nums: 1
+    parallel: 1
+    total_steps: 1000000
+    eval_episodes: 0
+  algo_cfgs:
+    steps_per_epoch: 2000
+    update_cycle: 1
+    update_iters: 1
+    size: 1000000
+    batch_size: 256
+    reward_normalize: False
+    cost_normalize: True
+    obs_normalize: False
+    max_grad_norm: 40
+    use_max_grad_norm: True
+    use_critic_norm: False
+    critic_norm_coeff: 0.001
+    polyak: 0.005
+    gamma: 0.99
+    start_learning_steps: 0
+    policy_delay: 2
+    use_exploration_noise: False
+    exploration_noise: 0.1
+    policy_noise: 0.2
+    policy_noise_clip: 0.5
+    alpha: 0.2
+    auto_alpha: False
+    use_cost: True
+    warmup_epochs: 100
+    # On-policy (Phase 1) specific
+    lam: 0.95
+    lam_c: 0.95
+    adv_estimation_method: gae
+    standardized_rew_adv: True
+    standardized_cost_adv: True
+    penalty_coef: 0.0
+    target_kl: 0.01
+    cg_damping: 0.1
+    cg_iters: 15
+    fvp_sample_freq: 1
+  logger_cfgs:
+    use_wandb: True
+    wandb_project: omnisafe
+    use_tensorboard: True
+    save_model_freq: 100
+    log_dir: "./runs"
+    window_lens: 10
+  model_cfgs:
+    weight_initialization_mode: "kaiming_uniform"
+    actor_type: gaussian_sac
+    linear_lr_decay: False
+    actor:
+      hidden_sizes: [256, 256]
+      activation: relu
+      lr: 0.0001
+    critic:
+      num_critics: 2
+      hidden_sizes: [256, 256]
+      activation: relu
+      lr: 0.0003
+  lagrange_cfgs:
+    pid_kp: 0.000001
+    pid_ki: 0.0000001
+    pid_kd: 0.0000001
+    pid_d_delay: 10
+    pid_delta_p_ema_alpha: 0.95
+    pid_delta_d_ema_alpha: 0.95
+    sum_norm: True
+    diff_norm: False
+    cost_limit: 10.0
+    penalty_max: 100.0
+    lagrangian_multiplier_init: 0.001
+
+SafetyPointGoal1-v0:
+  algo_cfgs:
+    cost_normalize: False
+    alpha: 0.00001
+  model_cfgs:
+    actor:
+      lr: 0.000005
+    critic:
+      lr: 0.001
+  lagrange_cfgs:
+    pid_kp: 0.0000005
+    pid_ki: 0.00000001
+    pid_kd: 0.00000001
+
+SafetyPointCircle1-v0:
+  algo_cfgs:
+    cost_normalize: False
+    alpha: 0.00001
+  model_cfgs:
+    actor:
+      lr: 0.000005
+    critic:
+      lr: 0.001
+  lagrange_cfgs:
+    pid_kp: 0.0000005
+    pid_ki: 0.00000001
+    pid_kd: 0.00000001

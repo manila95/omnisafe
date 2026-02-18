@@ -22,6 +22,7 @@ from omnisafe.algorithms.off_policy.sac import SAC
 from omnisafe.algorithms.off_policy.sac_lag import SACLag
 from omnisafe.algorithms.off_policy.sac_pid import SACPID
 from omnisafe.algorithms.off_policy.td3 import TD3
+from omnisafe.algorithms.off_policy.trpo_sac_pid import TRPOSACPID
 from omnisafe.algorithms.off_policy.td3_lag import TD3Lag
 from omnisafe.algorithms.off_policy.td3_pid import TD3PID
 
@@ -37,4 +38,5 @@ __all__ = [
     'TD3PID',
     'SACPID',
     'CRABS',
+    'TRPOSACPID',
 ]
