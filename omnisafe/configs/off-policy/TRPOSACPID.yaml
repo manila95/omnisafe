@@ -38,6 +38,8 @@ defaults:
     auto_alpha: False
     use_cost: True
     warmup_epochs: 100
+    # Phase 1: number of Q-critic update iterations per warmup epoch (off-policy critics)
+    phase1_q_update_iters: 4
     # On-policy (Phase 1) specific
     lam: 0.95
     lam_c: 0.95

@@ -293,9 +293,18 @@ class TRPOSACPID(SACPID):
         )
 
         # Q-critic updates (Option A: train in parallel during phase 1)
-        if self._buf.size >= self._cfgs.algo_cfgs.batch_size:
-            for _ in range(self._cfgs.algo_cfgs.update_iters):
-                q_data = self._buf.sample_batch()
+        phase1_q_iters = getattr(
+            self._cfgs.algo_cfgs,
+            'phase1_q_update_iters',
+            self._cfgs.algo_cfgs.update_iters,
+        )
+        if self._buf.size > 0:
+            q_batch_size = min(
+                self._buf.size,
+                self._cfgs.algo_cfgs.batch_size,
+            )
+            for _ in range(phase1_q_iters):
+                q_data = self._buf.sample_batch(batch_size=q_batch_size)
                 q_obs = q_data['obs']
                 q_act = q_data['act']
                 q_reward = q_data['reward']
@@ -312,7 +321,12 @@ class TRPOSACPID(SACPID):
         # Policy: already shared, no copy needed
         # Lambda: SACPID's _lagrange is PIDLagrangian, already updated during phase 1
         # Replay buffer: already populated
-        self._logger.log('INFO: Transitioning from Phase 1 (TRPOPID) to Phase 2 (SACPID)')
+        n_steps = self._buf.size
+        n_transitions = n_steps * self._buf.num_envs
+        self._logger.log(
+            f'INFO: Transitioning from Phase 1 (TRPOPID) to Phase 2 (SACPID) '
+            f'with {n_steps} steps ({n_transitions} transitions) in replay buffer'
+        )
 
     def learn(self) -> tuple[float, float, float]:
         """Two-phase training: TRPOPID warmup then SACPID."""
