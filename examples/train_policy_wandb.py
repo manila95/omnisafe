@@ -27,6 +27,7 @@ Standalone with CLI (overrides YAML defaults):
 from __future__ import annotations
 
 import argparse
+import sys
 
 import omnisafe
 from omnisafe.utils.tools import flat_config_to_nested, flatten_dict_to_dot
@@ -48,7 +49,12 @@ if __name__ == '__main__':
     parser.add_argument('--torch-threads', type=int, default=16, dest='torch_threads', help='torch threads')
     args, unparsed = parser.parse_known_args()
 
-    # Start from sweep config (if any), then override with CLI
+    def cli_flag_passed(name: str) -> bool:
+        """True if a CLI flag that maps to this name was explicitly passed (e.g. --total-steps -> total_steps)."""
+        normalized = [a.lstrip('-').replace('-', '_') for a in sys.argv if a.startswith('--')]
+        return name in normalized
+
+    # Start from sweep config (if any), then override with CLI only when explicitly passed
     run = wandb.init()
     # Normalize wandb.config: skip keys with '=', flatten nested dicts to dot keys, map env -> env_id
     raw = dict(wandb.config)
@@ -57,14 +63,23 @@ if __name__ == '__main__':
         skip_keys_with_eq=True,
     )
     config = dict(config_flat)
-    config['algo'] = getattr(args, 'algo', config.get('algo', 'SACPID'))
-    config['env_id'] = getattr(args, 'env_id', config.get('env_id') or config.get('env', 'SafetyPointGoal1-v0'))
-    config['seed'] = getattr(args, 'seed', config.get('seed', 42))
-    config['total_steps'] = getattr(args, 'total_steps', config.get('total_steps', 1000000))
-    config['device'] = getattr(args, 'device', config.get('device', 'cpu'))
-    config['parallel'] = getattr(args, 'parallel', config.get('parallel', 1))
-    config['vector_env_nums'] = getattr(args, 'vector_env_nums', config.get('vector_env_nums', 1))
-    config['torch_threads'] = getattr(args, 'torch_threads', config.get('torch_threads', 16))
+    # Prefer sweep (config) values; override with args only when user passed the flag on CLI
+    config['algo'] = args.algo if cli_flag_passed('algo') else config.get('algo', args.algo)
+    config['env_id'] = (
+        args.env_id if cli_flag_passed('env_id') or cli_flag_passed('env') else (config.get('env_id') or config.get('env') or args.env_id)
+    )
+    config['seed'] = args.seed if cli_flag_passed('seed') else config.get('seed', args.seed)
+    config['total_steps'] = (
+        args.total_steps if cli_flag_passed('total_steps') else config.get('total_steps', args.total_steps)
+    )
+    config['device'] = args.device if cli_flag_passed('device') else config.get('device', args.device)
+    config['parallel'] = args.parallel if cli_flag_passed('parallel') else config.get('parallel', args.parallel)
+    config['vector_env_nums'] = (
+        args.vector_env_nums if cli_flag_passed('vector_env_nums') else config.get('vector_env_nums', args.vector_env_nums)
+    )
+    config['torch_threads'] = (
+        args.torch_threads if cli_flag_passed('torch_threads') else config.get('torch_threads', args.torch_threads)
+    )
 
     # CLI overrides for nested keys, e.g. --algo_cfgs.warmup_epochs 0
     if unparsed:
