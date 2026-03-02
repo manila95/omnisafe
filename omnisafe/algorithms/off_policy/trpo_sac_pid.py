@@ -22,16 +22,23 @@ Phase 2: Switch to SACPID with policy and lambda transferred from Phase 1.
 
 from __future__ import annotations
 
+import io
 import time
 from typing import Any
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
+import wandb
 import torch.nn as nn
 from rich.progress import track
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.utils.data import DataLoader, TensorDataset
 
 from omnisafe.adapter.hybrid_adapter import HybridAdapter
+from omnisafe.utils.q_mc_eval import q_vs_mc_scatter_figure
 from omnisafe.algorithms import registry
 from omnisafe.algorithms.off_policy.sac_pid import SACPID
 from omnisafe.common.buffer import VectorOffPolicyBuffer, VectorOnPolicyBuffer
@@ -43,6 +50,23 @@ from omnisafe.utils.tools import (
     get_flat_params_from,
     set_param_values_to_model,
 )
+
+
+def _log_figure_to_wandb(fig: Any, tag: str, step: int) -> None:
+    """Log a matplotlib figure directly to wandb."""
+    if wandb.run is None:
+        return
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+    buf.seek(0)
+    try:
+        from PIL import Image as PILImage
+        img = np.array(PILImage.open(buf).copy())
+    except ImportError:
+        import matplotlib.image as mpimg
+        buf.seek(0)
+        img = mpimg.imread(buf)
+    wandb.log({tag: wandb.Image(img), 'epoch': step})
 
 
 @registry.register
@@ -150,6 +174,11 @@ class TRPOSACPID(SACPID):
         self._logger.register_key('Train/KL')
         self._logger.register_key('Train/StopIter')
         self._logger.register_key('Value/Adv')
+        # Phase 2: Q vs MC scatter (off-policy value evaluation)
+        self._logger.register_key('Q_MC/reward_mae')
+        self._logger.register_key('Q_MC/reward_corr')
+        self._logger.register_key('Q_MC/cost_mae')
+        self._logger.register_key('Q_MC/cost_corr')
 
     def _phase1_trpo_adv_surrogate(
         self,
@@ -358,6 +387,40 @@ class TRPOSACPID(SACPID):
 
             total_env_steps = (epoch + 1) * self._cfgs.algo_cfgs.steps_per_epoch
 
+            # Phase 1: Q vs MC scatter (Q-critics are trained in parallel during warmup)
+            eval_env = getattr(self._env, '_eval_env', None)
+            log_q_mc_freq = getattr(self._cfgs.algo_cfgs, 'log_q_mc_freq', 0)
+            if log_q_mc_freq > 0 and epoch % log_q_mc_freq == 0 and eval_env is not None:
+                num_ep = getattr(self._cfgs.algo_cfgs, 'q_mc_num_episodes', 20)
+                max_pt = getattr(self._cfgs.algo_cfgs, 'q_mc_max_points', 500)
+                fig, qmc_stats = q_vs_mc_scatter_figure(
+                    env=eval_env,
+                    actor_critic=self._actor_critic,
+                    gamma=self._cfgs.algo_cfgs.gamma,
+                    num_episodes=num_ep,
+                    max_ep_len=getattr(eval_env, '_max_ep_len', None) or getattr(eval_env, 'time_limit', 1000),
+                    use_cost=self._cfgs.algo_cfgs.use_cost,
+                    device=self._device,
+                    deterministic_policy=False,
+                    max_points=max_pt,
+                )
+                _log_figure_to_wandb(fig, 'Q_vs_MC/scatter', epoch)
+                self._logger.log_figure('Q_vs_MC/scatter', fig, step=epoch)
+                plt.close(fig)
+                phase1_qmc = {
+                    'Q_MC/reward_mae': qmc_stats.get('reward/mae', 0.0),
+                    'Q_MC/reward_corr': qmc_stats.get('reward/correlation', 0.0),
+                    'Q_MC/cost_mae': qmc_stats.get('cost/mae', 0.0),
+                    'Q_MC/cost_corr': qmc_stats.get('cost/correlation', 0.0),
+                }
+            else:
+                phase1_qmc = {
+                    'Q_MC/reward_mae': 0.0,
+                    'Q_MC/reward_corr': 0.0,
+                    'Q_MC/cost_mae': 0.0,
+                    'Q_MC/cost_corr': 0.0,
+                }
+
             eval_start = time.time()
             self._env.eval_policy(
                 episode=self._cfgs.train_cfgs.eval_episodes,
@@ -378,6 +441,7 @@ class TRPOSACPID(SACPID):
                     'Train/Epoch': epoch,
                     'Train/Phase': 1,
                     'Train/LR': self._actor_critic.actor_scheduler.get_last_lr()[0],
+                    **phase1_qmc,
                 },
             )
             self._logger.dump_tabular()
@@ -420,6 +484,48 @@ class TRPOSACPID(SACPID):
                 update_time += time.time() - update_start
 
             total_env_steps = (epoch + 1) * self._cfgs.algo_cfgs.steps_per_epoch
+
+            # Phase 2: off-policy Q vs MC return scatter (evaluate value function)
+            eval_env = getattr(self._env, '_eval_env', None)
+            log_q_mc_freq = getattr(self._cfgs.algo_cfgs, 'log_q_mc_freq', 0)
+            if (
+                log_q_mc_freq > 0
+                and (epoch - warmup_epochs) % log_q_mc_freq == 0
+                and eval_env is not None
+            ):
+                num_ep = getattr(self._cfgs.algo_cfgs, 'q_mc_num_episodes', 20)
+                max_pt = getattr(self._cfgs.algo_cfgs, 'q_mc_max_points', 500)
+                fig, qmc_stats = q_vs_mc_scatter_figure(
+                    env=eval_env,
+                    actor_critic=self._actor_critic,
+                    gamma=self._cfgs.algo_cfgs.gamma,
+                    num_episodes=num_ep,
+                    max_ep_len=getattr(eval_env, '_max_ep_len', None) or getattr(eval_env, 'time_limit', 1000),
+                    use_cost=self._cfgs.algo_cfgs.use_cost,
+                    device=self._device,
+                    deterministic_policy=False,
+                    max_points=max_pt,
+                )
+                _log_figure_to_wandb(fig, 'Q_vs_MC/scatter', epoch)
+                self._logger.log_figure('Q_vs_MC/scatter', fig, step=epoch)
+                plt.close(fig)
+                self._logger.store(
+                    {
+                        'Q_MC/reward_mae': qmc_stats.get('reward/mae', 0.0),
+                        'Q_MC/reward_corr': qmc_stats.get('reward/correlation', 0.0),
+                        'Q_MC/cost_mae': qmc_stats.get('cost/mae', 0.0),
+                        'Q_MC/cost_corr': qmc_stats.get('cost/correlation', 0.0),
+                    },
+                )
+            else:
+                self._logger.store(
+                    {
+                        'Q_MC/reward_mae': 0.0,
+                        'Q_MC/reward_corr': 0.0,
+                        'Q_MC/cost_mae': 0.0,
+                        'Q_MC/cost_corr': 0.0,
+                    },
+                )
 
             eval_start = time.time()
             self._env.eval_policy(

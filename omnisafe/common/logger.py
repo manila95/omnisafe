@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import atexit
 import csv
+import io
 import os
 import time
 from collections import deque
@@ -317,6 +318,39 @@ class Logger:  # pylint: disable=too-many-instance-attributes
             if self._use_wandb:
                 wandb.log(self._current_row, step=self._epoch)
             self._console.print(table)
+
+    def log_figure(
+        self,
+        tag: str,
+        figure: Any,
+        step: int | None = None,
+    ) -> None:
+        """Log a matplotlib figure to tensorboard and/or wandb.
+
+        Args:
+            tag (str): Name for the figure (e.g. 'Q_vs_MC/scatter').
+            figure: A matplotlib Figure.
+            step (int or None): Global step. If None, uses current_epoch.
+        """
+        if not self._maste_proc:
+            return
+        step = step if step is not None else self._epoch
+        if self._use_tensorboard:
+            self._tensorboard_writer.add_figure(tag, figure, global_step=step)
+            self._tensorboard_writer.flush()
+        if self._use_wandb:
+            buf = io.BytesIO()
+            figure.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+            buf.seek(0)
+            try:
+                from PIL import Image as PILImage
+                img = PILImage.open(buf).copy()
+                wandb.log({tag: wandb.Image(np.array(img)), 'epoch': step})
+            except ImportError:
+                import matplotlib.image as mpimg
+                buf.seek(0)
+                img = mpimg.imread(buf)
+                wandb.log({tag: wandb.Image(img), 'epoch': step})
 
     def _update_current_row(self) -> None:
         """Update the current row.

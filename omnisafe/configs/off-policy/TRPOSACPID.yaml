@@ -51,6 +51,10 @@ defaults:
     cg_damping: 0.1
     cg_iters: 15
     fvp_sample_freq: 1
+    # Phase 2: Q vs MC scatter (off-policy value evaluation); requires eval env
+    log_q_mc_freq: 10  # log scatter every N epochs (0 = off)
+    q_mc_num_episodes: 200
+    q_mc_max_points: 500
   logger_cfgs:
     use_wandb: True
     wandb_project: omnisafe
