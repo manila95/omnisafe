@@ -27,6 +27,19 @@ from omnisafe.common.pid_lagrange import PIDLagrangian
 class SACPID(SAC):
     """The SACPID (PID version of SACLag) algorithm.
 
+    .. note::
+        The replay buffer size is controlled by the ``algo_cfgs.size`` parameter
+        (default: ``1000000``). You can customize it via ``custom_cfgs``:
+
+        .. code-block:: python
+
+            custom_cfgs = {
+                'algo_cfgs': {
+                    'size': 500000,
+                },
+            }
+            agent = omnisafe.Agent('SACPID', env_id, custom_cfgs=custom_cfgs)
+
     References:
         - Title: Responsive Safety in Reinforcement Learning by PID Lagrangian Methods
         - Authors: Adam Stooke, Joshua Achiam, Pieter Abbeel.
