@@ -423,6 +423,58 @@ class CostNormalize(Wrapper):
         return saved
 
 
+class CostLimitNormalize(Wrapper):
+    """Normalize the cost by dividing by the cost limit.
+
+    This produces a stationary normalization where the constraint threshold in normalized
+    space is always 1.0, keeping the cost critic and PID on a consistent scale.
+
+    Args:
+        env (CMDP): The environment to wrap.
+        device (torch.device): The torch device to use.
+        cost_limit (float): The cost limit to normalize by.
+    """
+
+    def __init__(self, env: CMDP, device: torch.device, cost_limit: float) -> None:
+        """Initialize an instance of :class:`CostLimitNormalize`."""
+        super().__init__(env=env, device=device)
+        assert cost_limit > 0.0, 'cost_limit must be positive for CostLimitNormalize.'
+        self._cost_limit: float = cost_limit
+
+    def step(
+        self,
+        action: torch.Tensor,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        dict[str, Any],
+    ]:
+        """Run one timestep of the environment's dynamics using the agent actions.
+
+        .. note::
+            The cost will be divided by ``cost_limit`` so that the constraint threshold in
+            normalized space is 1.0. The original cost is stored in ``info['original_cost']``.
+
+        Args:
+            action (torch.Tensor): The action from the agent or random.
+
+        Returns:
+            observation: The agent's observation of the current environment.
+            reward: The amount of reward returned after previous action.
+            cost: The amount of cost returned after previous action.
+            terminated: Whether the episode has ended.
+            truncated: Whether the episode has been truncated due to a time limit.
+            info: Some information logged by the environment.
+        """
+        obs, reward, cost, terminated, truncated, info = super().step(action)
+        info['original_cost'] = cost
+        cost = cost / self._cost_limit
+        return obs, reward, cost, terminated, truncated, info
+
+
 class ActionScale(Wrapper):
     """Scale the action space to a given range.
 

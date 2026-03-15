@@ -19,6 +19,7 @@ import torch
 
 from omnisafe.algorithms import registry
 from omnisafe.algorithms.off_policy.sac import SAC
+from omnisafe.algorithms.off_policy.utils import estimate_true_value
 from omnisafe.common.pid_lagrange import PIDLagrangian
 
 
@@ -39,7 +40,11 @@ class SACPID(SAC):
         The SACPID algorithm uses a PID-Lagrange multiplier to balance the cost and reward.
         """
         super()._init()
-        self._lagrange: PIDLagrangian = PIDLagrangian(**self._cfgs.lagrange_cfgs)
+        lagrange_cfgs = self._cfgs.lagrange_cfgs.todict()
+        if self._cfgs.algo_cfgs.get('cost_limit_normalize', False):
+            lagrange_cfgs['cost_limit'] = 1.0
+        self._lagrange: PIDLagrangian = PIDLagrangian(**lagrange_cfgs)
+        self._last_value_eval_epoch: int = -1
 
     def _init_log(self) -> None:
         """Log the SACPID specific information.
@@ -52,6 +57,14 @@ class SACPID(SAC):
         """
         super()._init_log()
         self._logger.register_key('Metrics/LagrangeMultiplier')
+        value_eval_freq = self._cfgs.algo_cfgs.get('value_eval_freq', 0)
+        if value_eval_freq > 0:
+            self._logger.register_key('Value/TrueC')
+            self._logger.register_key('Value/EstimateC')
+            self._logger.register_key('Value/CError')
+            self._logger.register_key('Value/TrueR')
+            self._logger.register_key('Value/EstimateR')
+            self._logger.register_key('Value/RError')
 
     def _update(self) -> None:
         """Update actor, critic, as we used in the :class:`PolicyGradient` algorithm.
@@ -61,6 +74,8 @@ class SACPID(SAC):
         """
         super()._update()
         Jc = self._logger.get_stats('Metrics/EpCost')[0]
+        if self._cfgs.algo_cfgs.get('cost_limit_normalize', False):
+            Jc = Jc / self._cfgs.lagrange_cfgs.cost_limit
         if self._epoch > self._cfgs.algo_cfgs.warmup_epochs:
             self._lagrange.pid_update(Jc)
         self._logger.store(
@@ -68,6 +83,31 @@ class SACPID(SAC):
                 'Metrics/LagrangeMultiplier': self._lagrange.lagrangian_multiplier,
             },
         )
+        value_eval_freq = self._cfgs.algo_cfgs.get('value_eval_freq', 0)
+        if (
+            value_eval_freq > 0
+            and self._epoch % value_eval_freq == 0
+            and self._epoch != self._last_value_eval_epoch
+        ):
+            self._last_value_eval_epoch = self._epoch
+            c_error, true_c, est_c, r_error, true_r, est_r = estimate_true_value(
+                actor_critic=self._actor_critic,
+                adapter=self._env,
+                logger=self._logger,
+                discount=self._cfgs.algo_cfgs.gamma,
+                eval_episodes=self._cfgs.algo_cfgs.eval_episodes,
+                step=self._epoch * self._cfgs.algo_cfgs.steps_per_epoch,
+            )
+            self._logger.store(
+                {
+                    'Value/TrueC': true_c,
+                    'Value/EstimateC': est_c,
+                    'Value/CError': c_error,
+                    'Value/TrueR': true_r,
+                    'Value/EstimateR': est_r,
+                    'Value/RError': r_error,
+                },
+            )
 
     def _loss_pi(
         self,

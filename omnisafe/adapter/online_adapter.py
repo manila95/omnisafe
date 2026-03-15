@@ -24,6 +24,7 @@ from omnisafe.envs.core import CMDP, make, support_envs
 from omnisafe.envs.wrapper import (
     ActionScale,
     AutoReset,
+    CostLimitNormalize,
     CostNormalize,
     ObsNormalize,
     RewardNormalize,
@@ -73,12 +74,16 @@ class OnlineAdapter:
             obs_normalize=cfgs.algo_cfgs.obs_normalize,
             reward_normalize=cfgs.algo_cfgs.reward_normalize,
             cost_normalize=cfgs.algo_cfgs.cost_normalize,
+            cost_limit_normalize=cfgs.algo_cfgs.get('cost_limit_normalize', False),
         )
 
         self._eval_env: CMDP | None = None
         if self._env.need_evaluation:
             self._eval_env = make(env_id, num_envs=1, device=self._device, **env_cfgs)
-            self._wrapper_eval(obs_normalize=cfgs.algo_cfgs.obs_normalize)
+            self._wrapper_eval(
+                obs_normalize=cfgs.algo_cfgs.obs_normalize,
+                cost_limit_normalize=cfgs.algo_cfgs.get('cost_limit_normalize', False),
+            )
 
         self._env.set_seed(seed)
 
@@ -87,6 +92,7 @@ class OnlineAdapter:
         obs_normalize: bool = True,
         reward_normalize: bool = True,
         cost_normalize: bool = True,
+        cost_limit_normalize: bool = False,
     ) -> None:
         """Wrapper the environment.
 
@@ -135,6 +141,12 @@ class OnlineAdapter:
             self._env = RewardNormalize(self._env, device=self._device)
         if cost_normalize:
             self._env = CostNormalize(self._env, device=self._device)
+        if cost_limit_normalize:
+            self._env = CostLimitNormalize(
+                self._env,
+                device=self._device,
+                cost_limit=self._cfgs.lagrange_cfgs.cost_limit,
+            )
         self._env = ActionScale(self._env, low=-1.0, high=1.0, device=self._device)
         if self._env.num_envs == 1:
             self._env = Unsqueeze(self._env, device=self._device)
@@ -142,13 +154,14 @@ class OnlineAdapter:
     def _wrapper_eval(
         self,
         obs_normalize: bool = True,
+        cost_limit_normalize: bool = False,
     ) -> None:
         """Wrapper the environment for evaluation.
 
         Args:
             obs_normalize (bool, optional): Whether to normalize the observation. Defaults to True.
-            reward_normalize (bool, optional): Whether to normalize the reward. Defaults to True.
-            cost_normalize (bool, optional): Whether to normalize the cost. Defaults to True.
+            cost_limit_normalize (bool, optional): Whether to normalize cost by cost_limit.
+                Defaults to False.
         """
         assert self._eval_env, 'Your environment for evaluation does not exist!'
         if self._env.need_time_limit_wrapper:
@@ -165,6 +178,12 @@ class OnlineAdapter:
             self._eval_env = AutoReset(self._eval_env, device=self._device)
         if obs_normalize:
             self._eval_env = ObsNormalize(self._eval_env, device=self._device)
+        if cost_limit_normalize:
+            self._eval_env = CostLimitNormalize(
+                self._eval_env,
+                device=self._device,
+                cost_limit=self._cfgs.lagrange_cfgs.cost_limit,
+            )
         self._eval_env = ActionScale(self._eval_env, low=-1.0, high=1.0, device=self._device)
         self._eval_env = Unsqueeze(self._eval_env, device=self._device)
 

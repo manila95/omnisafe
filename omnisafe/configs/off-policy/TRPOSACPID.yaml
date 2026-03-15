@@ -4,12 +4,17 @@
 # Phase 1: TRPOPID (on-policy safe RL) for warmup_epochs
 # Phase 2: SACPID (off-policy)
 
+# --- Speed tips (see docs / comments below) ---
+# - Use device: cuda if GPU available (biggest win).
+# - Increase vector_env_nums (e.g. 4–8) to parallelize env rollout.
+# - Set log_q_mc_freq: 0 to disable Q vs MC scatter (saves 200 eval episodes every 10 epochs).
+# - Phase 1: reduce cg_iters / increase fvp_sample_freq to speed TRPO; reduce phase1_q_update_iters if needed.
 defaults:
   seed: 0
   train_cfgs:
-    device: cpu
+    device: cpu  # set to cuda (e.g. --train_cfgs.device cuda) for much faster training
     torch_threads: 16
-    vector_env_nums: 1
+    vector_env_nums: 4  # parallel envs for faster rollout (adjust for your CPU/memory)
     parallel: 1
     total_steps: 1000000
     eval_episodes: 0
@@ -52,8 +57,8 @@ defaults:
     cg_iters: 15
     fvp_sample_freq: 1
     # Phase 2: Q vs MC scatter (off-policy value evaluation); requires eval env
-    log_q_mc_freq: 10  # log scatter every N epochs (0 = off)
-    q_mc_num_episodes: 200
+    log_q_mc_freq: 0  # set to 10 to enable; 0 = off (saves time: 200 episodes every 10 epochs)
+    q_mc_num_episodes: 20  # if log_q_mc_freq > 0, reduce from 200 to ~20 for speed
     q_mc_max_points: 500
   logger_cfgs:
     use_wandb: True

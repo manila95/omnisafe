@@ -46,6 +46,12 @@ defaults:
     reward_normalize: False
     # normalize cost
     cost_normalize: True
+    # normalize cost by dividing by cost_limit (stationary, keeps critic and PID on same scale)
+    cost_limit_normalize: False
+    # evaluate true vs estimated Q-values every N epochs (0 = disabled)
+    value_eval_freq: 0
+    # Eval episodes for value evaluation
+    eval_episodes: 100
     # normalize observation
     obs_normalize: False
     # max gradient norm
