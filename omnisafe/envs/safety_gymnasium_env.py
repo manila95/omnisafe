@@ -134,6 +134,11 @@ class SafetyGymnasiumEnv(CMDP):
         super().__init__(env_id)
         self._num_envs = num_envs
         self._device = torch.device(device)
+        self._sim_timestep: float | None = kwargs.pop('sim_timestep', None)
+        # Ensure num_steps (task internal counter) matches max_episode_steps so both
+        # termination mechanisms are consistent. User only needs to set max_episode_steps.
+        if 'max_episode_steps' in kwargs and 'num_steps' not in kwargs:
+            kwargs['num_steps'] = kwargs['max_episode_steps']
 
         if num_envs > 1:
             self._env = safety_gymnasium.vector.make(env_id=env_id, num_envs=num_envs, **kwargs)
@@ -225,6 +230,8 @@ class SafetyGymnasiumEnv(CMDP):
             info: Some information logged by the environment.
         """
         obs, info = self._env.reset(seed=seed, options=options)
+        if self._sim_timestep is not None:
+            self._env.unwrapped.task.model.opt.timestep = self._sim_timestep
         return torch.as_tensor(obs, dtype=torch.float32, device=self._device), info
 
     @property
