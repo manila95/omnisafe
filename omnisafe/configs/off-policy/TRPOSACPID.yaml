@@ -11,6 +11,12 @@
 # - Phase 1: reduce cg_iters / increase fvp_sample_freq to speed TRPO; reduce phase1_q_update_iters if needed.
 defaults:
   seed: 0
+  # environment configurations (passed as kwargs to safety_gymnasium.make)
+  env_cfgs:
+    # maximum steps per episode; also sets the task internal step counter
+    max_episode_steps: 1000
+    # MuJoCo simulation timestep in seconds (re-applied after every reset)
+    sim_timestep: 0.002
   train_cfgs:
     device: cpu  # set to cuda (e.g. --train_cfgs.device cuda) for much faster training
     torch_threads: 16

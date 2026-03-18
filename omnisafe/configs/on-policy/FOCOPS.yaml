@@ -16,6 +16,12 @@
 defaults:
   # seed for random number generator
   seed: 0
+  # environment configurations (passed as kwargs to safety_gymnasium.make)
+  env_cfgs:
+    # maximum steps per episode; also sets the task internal step counter
+    max_episode_steps: 1000
+    # MuJoCo simulation timestep in seconds (re-applied after every reset)
+    sim_timestep: 0.002
   # training configurations
   train_cfgs:
     # device to use for training, options: cpu, cuda, cuda:0, cuda:0,1, etc.
