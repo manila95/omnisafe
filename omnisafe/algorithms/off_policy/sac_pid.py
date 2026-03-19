@@ -71,8 +71,58 @@ class SACPID(SAC):
 
         Additionally, we update the Lagrange multiplier parameter by calling the
         :meth:`pid_update` method.
+
+        When ``cost_critic_recency_decay > 0`` the cost critic is updated with a
+        separately sampled batch whose time-step indices are drawn with exponential
+        recency weights, while the reward critic and actor continue to use the
+        standard uniform replay-buffer sample.  Setting the decay to ``0`` (the
+        default) recovers the original behaviour.
         """
-        super()._update()
+        recency_decay: float = self._cfgs.algo_cfgs.get('recency_decay', 0.001)
+        recency_reward: bool = self._cfgs.algo_cfgs.get('recency_reward_critic', False)
+        recency_cost: bool = self._cfgs.algo_cfgs.get('recency_cost_critic', False)
+
+        for _ in range(self._cfgs.algo_cfgs.update_iters):
+            data = self._buf.sample_batch()
+            self._update_count += 1
+            obs, act, reward, cost, done, next_obs = (
+                data['obs'],
+                data['act'],
+                data['reward'],
+                data['cost'],
+                data['done'],
+                data['next_obs'],
+            )
+
+            if recency_reward:
+                r_data = self._buf.sample_batch_recency_weighted(recency_decay)
+                self._update_reward_critic(
+                    r_data['obs'],
+                    r_data['act'],
+                    r_data['reward'],
+                    r_data['done'],
+                    r_data['next_obs'],
+                )
+            else:
+                self._update_reward_critic(obs, act, reward, done, next_obs)
+
+            if self._cfgs.algo_cfgs.use_cost:
+                if recency_cost:
+                    c_data = self._buf.sample_batch_recency_weighted(recency_decay)
+                    self._update_cost_critic(
+                        c_data['obs'],
+                        c_data['act'],
+                        c_data['cost'],
+                        c_data['done'],
+                        c_data['next_obs'],
+                    )
+                else:
+                    self._update_cost_critic(obs, act, cost, done, next_obs)
+
+            if self._update_count % self._cfgs.algo_cfgs.policy_delay == 0:
+                self._update_actor(obs)
+                self._actor_critic.polyak_update(self._cfgs.algo_cfgs.polyak)
+
         Jc = self._logger.get_stats('Metrics/EpCost')[0]
         if self._cfgs.algo_cfgs.get('cost_limit_normalize', False):
             Jc = Jc / self._cfgs.lagrange_cfgs.cost_limit

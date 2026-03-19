@@ -90,6 +90,13 @@ defaults:
     use_cost: True
     # warm up epoch
     warmup_epochs: 100
+    # Recency-biased replay sampling for critics.
+    # Time-step indices are weighted by exp(-recency_decay * age), where age=0
+    # is the most recent transition.  The two boolean flags control which
+    # critics use this weighted batch instead of the standard uniform sample.
+    recency_decay: 0.001
+    recency_reward_critic: False
+    recency_cost_critic: False
   # logger configurations
   logger_cfgs:
     # use wandb for logging

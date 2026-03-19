@@ -141,3 +141,37 @@ class VectorOffPolicyBuffer(OffPolicyBuffer):
         )
         env_idx = torch.arange(self._num_envs, device=self._device).repeat(batch_size)
         return {key: value[idx, env_idx] for key, value in self.data.items()}
+
+    def sample_batch_recency_weighted(
+        self,
+        decay: float,
+        batch_size: int | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Sample a batch with exponential recency weighting (recent samples preferred).
+
+        Each time step in the buffer is assigned weight ``exp(-decay * age)`` where
+        ``age = 0`` for the most recently stored step and increases for older ones.
+        Setting ``decay = 0`` recovers uniform sampling (identical to
+        :meth:`sample_batch`).
+
+        Args:
+            decay (float): Exponential decay rate. Higher values concentrate
+                sampling on more recent transitions.
+            batch_size (int | None): Number of transitions per environment.
+                Defaults to ``self._batch_size``.
+
+        Returns:
+            The sampled batch of data.
+        """
+        if batch_size is None:
+            batch_size = self._batch_size
+
+        # age[k] = how many steps ago buffer slot k was written (0 = most recent)
+        all_time_idx = torch.arange(self._size, device=self._device)
+        ages = (self._ptr - 1 - all_time_idx) % self._size
+        weights = torch.exp(-decay * ages.float())
+        weights = weights / weights.sum()
+
+        idx = torch.multinomial(weights, batch_size * self._num_envs, replacement=True)
+        env_idx = torch.arange(self._num_envs, device=self._device).repeat(batch_size)
+        return {key: value[idx, env_idx] for key, value in self.data.items()}
