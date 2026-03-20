@@ -16,6 +16,8 @@
 
 
 import torch
+from torch import nn
+from torch.nn.utils.clip_grad import clip_grad_norm_
 
 from omnisafe.algorithms import registry
 from omnisafe.algorithms.off_policy.sac import SAC
@@ -81,6 +83,9 @@ class SACPID(SAC):
         recency_decay: float = self._cfgs.algo_cfgs.get('recency_decay', 0.001)
         recency_reward: bool = self._cfgs.algo_cfgs.get('recency_reward_critic', False)
         recency_cost: bool = self._cfgs.algo_cfgs.get('recency_cost_critic', False)
+        n_step_cost: int = self._cfgs.algo_cfgs.get('n_step_cost', 1)
+        retrace_lambda: float = self._cfgs.algo_cfgs.get('retrace_lambda', 0.0)
+        retrace_n_steps: int = self._cfgs.algo_cfgs.get('retrace_n_steps', 5)
 
         for _ in range(self._cfgs.algo_cfgs.update_iters):
             data = self._buf.sample_batch()
@@ -107,7 +112,37 @@ class SACPID(SAC):
                 self._update_reward_critic(obs, act, reward, done, next_obs)
 
             if self._cfgs.algo_cfgs.use_cost:
-                if recency_cost:
+                if retrace_lambda > 0.0:
+                    c_data, c_idx, c_env_idx = self._buf.sample_batch_nstep_safe(retrace_n_steps)
+                    retrace_targets = self._buf.compute_retrace_cost_targets(
+                        idx=c_idx,
+                        env_idx=c_env_idx,
+                        n_steps=retrace_n_steps,
+                        retrace_lambda=retrace_lambda,
+                        gamma=self._cfgs.algo_cfgs.gamma,
+                        target_cost_critic=self._actor_critic.target_cost_critic,
+                        actor=self._actor_critic.actor,
+                    )
+                    self._update_cost_critic_with_targets(
+                        c_data['obs'], c_data['act'], retrace_targets
+                    )
+                elif n_step_cost > 1:
+                    # Biased n-step approximation (no IS correction) — kept for ablations.
+                    c_data, c_idx, c_env_idx = self._buf.sample_batch_nstep_safe(n_step_cost)
+                    nstep_targets = self._buf.compute_nstep_cost_targets(
+                        idx=c_idx,
+                        env_idx=c_env_idx,
+                        n_steps=n_step_cost,
+                        gamma=self._cfgs.algo_cfgs.gamma,
+                        target_cost_critic=self._actor_critic.target_cost_critic,
+                        next_action_fn=lambda o: self._actor_critic.actor.predict(
+                            o, deterministic=False
+                        ),
+                    )
+                    self._update_cost_critic_with_targets(
+                        c_data['obs'], c_data['act'], nstep_targets
+                    )
+                elif recency_cost:
                     c_data = self._buf.sample_batch_recency_weighted(recency_decay)
                     self._update_cost_critic(
                         c_data['obs'],
@@ -158,6 +193,46 @@ class SACPID(SAC):
                     'Value/RError': r_error,
                 },
             )
+
+    def _update_cost_critic_with_targets(
+        self,
+        obs: torch.Tensor,
+        action: torch.Tensor,
+        targets: torch.Tensor,
+    ) -> None:
+        """Update the cost critic against precomputed targets (e.g. n-step returns).
+
+        Skips the TD target computation done in the base
+        :meth:`_update_cost_critic` and goes straight to the MSE loss.
+
+        Args:
+            obs (torch.Tensor): Observations sampled from the buffer.
+            action (torch.Tensor): Actions sampled from the buffer.
+            targets (torch.Tensor): Precomputed cost return targets, shape ``(B,)``.
+        """
+        q_value_c = self._actor_critic.cost_critic(obs, action)[0]
+        loss = nn.functional.mse_loss(q_value_c, targets)
+
+        if self._cfgs.algo_cfgs.use_critic_norm:
+            for param in self._actor_critic.cost_critic.parameters():
+                loss += param.pow(2).sum() * self._cfgs.algo_cfgs.critic_norm_coeff
+
+        self._actor_critic.cost_critic_optimizer.zero_grad()
+        loss.backward()
+
+        if self._cfgs.algo_cfgs.max_grad_norm:
+            clip_grad_norm_(
+                self._actor_critic.cost_critic.parameters(),
+                self._cfgs.algo_cfgs.max_grad_norm,
+            )
+        self._actor_critic.cost_critic_optimizer.step()
+
+        self._logger.store(
+            {
+                'Loss/Loss_cost_critic': loss.mean().item(),
+                'Value/cost_critic': q_value_c.mean().item(),
+            },
+        )
 
     def _loss_pi(
         self,

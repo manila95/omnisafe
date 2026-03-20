@@ -129,8 +129,10 @@ class OffPolicyAdapter(OnlineAdapter):
         for _ in range(rollout_step):
             if use_rand_action:
                 act = (torch.rand(self.action_space.shape) * 2 - 1).unsqueeze(0).to(self._device)  # type: ignore
+                logp = torch.zeros(self._current_obs.shape[0], device=self._device)
             else:
                 act = agent.step(self._current_obs, deterministic=False)
+                logp = agent.actor.log_prob(act)
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
 
             self._log_value(reward=reward, cost=cost, info=info)
@@ -149,6 +151,7 @@ class OffPolicyAdapter(OnlineAdapter):
                 cost=cost,
                 done=torch.logical_and(terminated, torch.logical_xor(terminated, truncated)),
                 next_obs=real_next_obs,
+                logp=logp,
             )
 
             self._current_obs = next_obs

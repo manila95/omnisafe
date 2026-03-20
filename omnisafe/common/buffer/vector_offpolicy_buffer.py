@@ -98,6 +98,9 @@ class VectorOffPolicyBuffer(OffPolicyBuffer):
             'cost': torch.zeros((size, num_envs), dtype=torch.float32, device=device),
             'done': torch.zeros((size, num_envs), dtype=torch.float32, device=device),
             'next_obs': next_obs_buf,
+            # log π_behavior(a|s) — behavior policy log-prob stored at rollout time,
+            # used by Retrace(λ) to compute off-policy importance sampling ratios.
+            'logp': torch.zeros((size, num_envs), dtype=torch.float32, device=device),
         }
 
     @property
@@ -141,6 +144,205 @@ class VectorOffPolicyBuffer(OffPolicyBuffer):
         )
         env_idx = torch.arange(self._num_envs, device=self._device).repeat(batch_size)
         return {key: value[idx, env_idx] for key, value in self.data.items()}
+
+    def sample_batch_nstep_safe(
+        self,
+        n_steps: int,
+        batch_size: int | None = None,
+    ) -> tuple[dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
+        """Sample a batch of starting transitions that are safe for n-step lookahead.
+
+        In the circular buffer, looking ``n_steps`` ahead from slot ``i`` gives
+        slot ``(i + n_steps) % max_size``.  This is only valid when those slots
+        were written **after** slot ``i`` in the same pass (i.e. they are not
+        overwritten newer data).  To guarantee this, we exclude the ``n_steps``
+        newest slots (those just before ``_ptr``) from the pool of starting
+        indices.
+
+        Args:
+            n_steps (int): Number of steps to look ahead.
+            batch_size (int | None): Number of transitions per environment.
+                Defaults to ``self._batch_size``.
+
+        Returns:
+            A tuple of (batch_dict, idx, env_idx) where ``idx`` and ``env_idx``
+            are the sampled time and environment indices, needed for
+            :meth:`compute_nstep_cost_targets`.
+        """
+        if batch_size is None:
+            batch_size = self._batch_size
+
+        n_safe = self._size - n_steps
+        assert n_safe > 0, (
+            f'Buffer has {self._size} transitions but n_step_cost={n_steps} '
+            f'requires at least {n_steps + 1} transitions.'
+        )
+
+        # Safe time indices: [_ptr, _ptr + n_safe) mod _max_size
+        # These are the oldest n_safe slots — all have n_steps newer slots ahead.
+        safe_offsets = torch.randint(0, n_safe, (batch_size * self._num_envs,), device=self._device)
+        idx = (self._ptr + safe_offsets) % self._max_size
+        env_idx = torch.arange(self._num_envs, device=self._device).repeat(batch_size)
+
+        batch = {key: value[idx, env_idx] for key, value in self.data.items()}
+        return batch, idx, env_idx
+
+    def compute_nstep_cost_targets(
+        self,
+        idx: torch.Tensor,
+        env_idx: torch.Tensor,
+        n_steps: int,
+        gamma: float,
+        target_cost_critic: torch.nn.Module,
+        next_action_fn: object,
+    ) -> torch.Tensor:
+        """Compute n-step cost return targets for the given starting indices.
+
+        For each starting transition ``(idx[i], env_idx[i])``, accumulates
+        discounted costs for up to ``n_steps`` forward, stopping early if a
+        terminal ``done`` is encountered, then bootstraps with the target cost
+        critic at the final step.
+
+        Episode boundaries are respected: once ``done=True`` is seen at step
+        ``k``, costs at steps ``k+1, ...`` and the bootstrap are zeroed out.
+
+        Args:
+            idx (torch.Tensor): Time indices of starting transitions, shape ``(B,)``.
+            env_idx (torch.Tensor): Environment indices, shape ``(B,)``.
+            n_steps (int): Number of lookahead steps.
+            gamma (float): Discount factor.
+            target_cost_critic (torch.nn.Module): Target cost critic network.
+                Called as ``target_cost_critic(obs, act)[0]``.
+            next_action_fn (callable): Maps ``next_obs -> action`` under the
+                current policy. Called with no-grad.
+
+        Returns:
+            Tensor of shape ``(B,)`` with n-step cost return targets.
+        """
+        with torch.no_grad():
+            batch_size = idx.shape[0]
+            accumulated = torch.zeros(batch_size, device=self._device)
+            # mask[i] = 1 if episode i is still alive (no done seen yet)
+            mask = torch.ones(batch_size, device=self._device)
+
+            for k in range(n_steps):
+                step_idx = (idx + k) % self._max_size
+                costs_k = self.data['cost'][step_idx, env_idx]
+                dones_k = self.data['done'][step_idx, env_idx]
+
+                accumulated += (gamma ** k) * mask * costs_k
+                mask = mask * (1.0 - dones_k)
+
+            # Bootstrap at step n using the target critic
+            final_idx = (idx + n_steps) % self._max_size
+            final_next_obs = self.data['next_obs'][final_idx, env_idx]
+            final_act = next_action_fn(final_next_obs)
+            bootstrap = target_cost_critic(final_next_obs, final_act)[0]
+            accumulated += (gamma ** n_steps) * mask * bootstrap
+
+        return accumulated
+
+    def compute_retrace_cost_targets(
+        self,
+        idx: torch.Tensor,
+        env_idx: torch.Tensor,
+        n_steps: int,
+        retrace_lambda: float,
+        gamma: float,
+        target_cost_critic: torch.nn.Module,
+        actor: torch.nn.Module,
+    ) -> torch.Tensor:
+        """Compute Retrace(λ) cost targets (Munos et al. 2016) for the given indices.
+
+        Unlike plain n-step returns, Retrace corrects for the off-policy mismatch
+        between the *behavior policy* (which generated the stored actions) and the
+        *current policy* via clipped per-step importance sampling ratios:
+
+        .. math::
+
+            c_k = \\lambda \\cdot \\min\\left(1,\\;
+                  \\frac{\\pi_{\\text{current}}(a_k|s_k)}{\\pi_{\\text{behavior}}(a_k|s_k)}
+                  \\right)
+
+        The target is accumulated in the forward direction:
+
+        .. math::
+
+            G_t^{\\text{ret}} = Q(s_t, a_t)
+            + \\sum_{k=0}^{n-1} \\gamma^k
+              \\left(\\prod_{i=1}^{k} c_i\\right) \\delta_k
+
+        where :math:`\\delta_k = c_{t+k} + \\gamma\\,V(s_{t+k+1}) - Q(s_{t+k}, a_{t+k})`
+        is the TD error and :math:`V(s) = Q_{\\text{target}}(s, \\pi_{\\text{current}}(s))`.
+        :math:`c_0 = 1` (no IS correction at the starting transition).
+
+        Episode boundaries (``done = 1``) zero the running IS-product and all
+        subsequent TD errors, truncating the return at the terminal step.
+
+        Args:
+            idx (torch.Tensor): Time indices of starting transitions, shape ``(B,)``.
+            env_idx (torch.Tensor): Environment indices, shape ``(B,)``.
+            n_steps (int): Number of lookahead steps.
+            retrace_lambda (float): Trace-decay parameter λ ∈ (0, 1].
+            gamma (float): Discount factor.
+            target_cost_critic (torch.nn.Module): Target cost critic.
+                Called as ``target_cost_critic(obs, act)[0]``.
+            actor (torch.nn.Module): Current policy actor with ``predict()`` and
+                ``log_prob()`` methods.
+
+        Returns:
+            Tensor of shape ``(B,)`` containing the Retrace cost targets.
+        """
+        with torch.no_grad():
+            # --- Seed: Q_target(s_t, a_t) as the base of the Retrace sum ---
+            start_obs = self.data['obs'][idx, env_idx]
+            start_act = self.data['act'][idx, env_idx]
+            g_retrace = target_cost_critic(start_obs, start_act)[0]
+
+            # Running product of IS ratios: Π_{i=1}^{k} c_i
+            # (c_0 = 1 by convention — no IS correction at the starting step)
+            product_c = torch.ones(idx.shape[0], device=self._device)
+
+            for k in range(n_steps):
+                step_idx = (idx + k) % self._max_size
+                next_step_idx = (idx + k + 1) % self._max_size
+
+                obs_k = self.data['obs'][step_idx, env_idx]
+                act_k = self.data['act'][step_idx, env_idx]
+                cost_k = self.data['cost'][step_idx, env_idx]
+                done_k = self.data['done'][step_idx, env_idx]
+
+                # Q_target(s_k, a_k) — stored action evaluated under target network
+                q_k = target_cost_critic(obs_k, act_k)[0]
+
+                # V(s_{k+1}) = Q_target(s_{k+1}, π_current(s_{k+1}))
+                obs_k1 = self.data['obs'][next_step_idx, env_idx]
+                act_k1_current = actor.predict(obs_k1, deterministic=False)
+                v_k1 = target_cost_critic(obs_k1, act_k1_current)[0]
+
+                # TD error: δ_k = c_k + γ·V(s_{k+1}) − Q(s_k, a_k)
+                delta_k = cost_k + gamma * v_k1 - q_k
+
+                # Accumulate: G += γ^k · product_c · δ_k
+                g_retrace = g_retrace + (gamma ** k) * product_c * delta_k
+
+                # --- Update IS product for the *next* step ---
+                # c_{k+1} = λ · min(1, π_current(a_{k+1}|s_{k+1}) / π_behavior(a_{k+1}|s_{k+1}))
+                # We evaluate π_current log-prob of the *stored* action at s_{k+1}.
+                if k + 1 < n_steps:
+                    logp_stored_k1 = self.data['logp'][next_step_idx, env_idx]
+                    act_k1_stored = self.data['act'][next_step_idx, env_idx]
+                    # Call predict to set up the distribution at obs_{k+1}, then
+                    # evaluate log_prob of the stored action (not the new sample).
+                    actor.predict(obs_k1, deterministic=False)
+                    logp_current_k1 = actor.log_prob(act_k1_stored)
+                    is_ratio = torch.exp(logp_current_k1 - logp_stored_k1).clamp(max=1.0)
+                    product_c = product_c * (retrace_lambda * is_ratio)
+
+                # Episode boundary: zero product_c so future steps don't contribute
+                product_c = product_c * (1.0 - done_k)
+
+        return g_retrace
 
     def sample_batch_recency_weighted(
         self,

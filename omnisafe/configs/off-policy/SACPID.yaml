@@ -97,6 +97,20 @@ defaults:
     recency_decay: 0.001
     recency_reward_critic: False
     recency_cost_critic: False
+    # N-step cost returns (1 = standard 1-step TD, backward-compatible default).
+    # When > 1 the cost critic target is computed by summing n real cost steps
+    # before bootstrapping, reducing reliance on the critic's own predictions.
+    # WARNING: biased under off-policy data — use retrace_lambda instead for the
+    # principled version. Kept for ablation comparisons.
+    # Note: retrace_lambda takes priority; n_step_cost is used only when retrace_lambda=0.
+    n_step_cost: 1
+    # Retrace(λ) for the cost critic (Munos et al. 2016).
+    # Uses per-step importance sampling ratios to correct for off-policy mismatch
+    # between stored (behavior) actions and the current policy.
+    # retrace_lambda=0 disables Retrace (default, backward-compatible).
+    # retrace_lambda=1 is the standard setting; values in (0,1] are valid.
+    retrace_lambda: 0.0
+    retrace_n_steps: 5
   # logger configurations
   logger_cfgs:
     # use wandb for logging
