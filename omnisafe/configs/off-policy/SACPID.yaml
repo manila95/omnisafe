@@ -104,13 +104,15 @@ defaults:
     # principled version. Kept for ablation comparisons.
     # Note: retrace_lambda takes priority; n_step_cost is used only when retrace_lambda=0.
     n_step_cost: 1
-    # Retrace(λ) for the cost critic (Munos et al. 2016).
-    # Uses per-step importance sampling ratios to correct for off-policy mismatch
-    # between stored (behavior) actions and the current policy.
+    # Retrace(λ) — principled off-policy multi-step returns (Munos et al. 2016).
     # retrace_lambda=0 disables Retrace (default, backward-compatible).
     # retrace_lambda=1 is the standard setting; values in (0,1] are valid.
+    # The two boolean flags select which critics use Retrace when lambda > 0.
+    # Reward Retrace includes SAC's entropy correction in V(s).
     retrace_lambda: 0.0
     retrace_n_steps: 5
+    retrace_reward_critic: False
+    retrace_cost_critic: True
   # logger configurations
   logger_cfgs:
     # use wandb for logging

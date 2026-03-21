@@ -344,6 +344,89 @@ class VectorOffPolicyBuffer(OffPolicyBuffer):
 
         return g_retrace
 
+    def compute_retrace_reward_targets(
+        self,
+        idx: torch.Tensor,
+        env_idx: torch.Tensor,
+        n_steps: int,
+        retrace_lambda: float,
+        gamma: float,
+        target_reward_critic: torch.nn.Module,
+        actor: torch.nn.Module,
+        alpha: float,
+    ) -> torch.Tensor:
+        """Compute Retrace(λ) reward targets with SAC entropy correction.
+
+        Identical in structure to :meth:`compute_retrace_cost_targets` but uses
+        the reward signal and incorporates SAC's maximum-entropy value estimate:
+
+        .. math::
+
+            V(s) = \\min(Q_1^{\\text{target}}, Q_2^{\\text{target}})(s, \\pi(s))
+                   - \\alpha \\log \\pi(s)
+
+        This matches the target used in :meth:`SAC._update_reward_critic` so that
+        multi-step reward targets are consistent with the 1-step baseline.
+
+        Args:
+            idx (torch.Tensor): Time indices of starting transitions, shape ``(B,)``.
+            env_idx (torch.Tensor): Environment indices, shape ``(B,)``.
+            n_steps (int): Number of lookahead steps.
+            retrace_lambda (float): Trace-decay parameter λ ∈ (0, 1].
+            gamma (float): Discount factor.
+            target_reward_critic (torch.nn.Module): Target reward critic (returns
+                two Q-values). Called as ``target_reward_critic(obs, act)`` →
+                ``(q1, q2)``.
+            actor (torch.nn.Module): Current policy actor with ``predict()`` and
+                ``log_prob()`` methods.
+            alpha (float): SAC entropy coefficient.
+
+        Returns:
+            Tensor of shape ``(B,)`` containing the Retrace reward targets.
+        """
+        with torch.no_grad():
+            start_obs = self.data['obs'][idx, env_idx]
+            start_act = self.data['act'][idx, env_idx]
+            q1_start, q2_start = target_reward_critic(start_obs, start_act)
+            g_retrace = torch.min(q1_start, q2_start)
+
+            product_c = torch.ones(idx.shape[0], device=self._device)
+
+            for k in range(n_steps):
+                step_idx = (idx + k) % self._max_size
+                next_step_idx = (idx + k + 1) % self._max_size
+
+                obs_k = self.data['obs'][step_idx, env_idx]
+                act_k = self.data['act'][step_idx, env_idx]
+                reward_k = self.data['reward'][step_idx, env_idx]
+                done_k = self.data['done'][step_idx, env_idx]
+
+                # Q_target(s_k, a_k) — min of two target critics at stored action
+                q1_k, q2_k = target_reward_critic(obs_k, act_k)
+                q_k = torch.min(q1_k, q2_k)
+
+                # V(s_{k+1}) = min(Q1, Q2)(s_{k+1}, π(s_{k+1})) − α·log π(s_{k+1})
+                obs_k1 = self.data['obs'][next_step_idx, env_idx]
+                act_k1_current = actor.predict(obs_k1, deterministic=False)
+                logp_k1 = actor.log_prob(act_k1_current)
+                q1_k1, q2_k1 = target_reward_critic(obs_k1, act_k1_current)
+                v_k1 = torch.min(q1_k1, q2_k1) - alpha * logp_k1
+
+                delta_k = reward_k + gamma * v_k1 - q_k
+                g_retrace = g_retrace + (gamma ** k) * product_c * delta_k
+
+                if k + 1 < n_steps:
+                    logp_stored_k1 = self.data['logp'][next_step_idx, env_idx]
+                    act_k1_stored = self.data['act'][next_step_idx, env_idx]
+                    actor.predict(obs_k1, deterministic=False)
+                    logp_current_k1 = actor.log_prob(act_k1_stored)
+                    is_ratio = torch.exp(logp_current_k1 - logp_stored_k1).clamp(max=1.0)
+                    product_c = product_c * (retrace_lambda * is_ratio)
+
+                product_c = product_c * (1.0 - done_k)
+
+        return g_retrace
+
     def sample_batch_recency_weighted(
         self,
         decay: float,

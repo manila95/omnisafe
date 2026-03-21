@@ -15,6 +15,8 @@
 """Implementation of the SACPID (PID version of SACLag) algorithm."""
 
 
+import warnings
+
 import torch
 from torch import nn
 from torch.nn.utils.clip_grad import clip_grad_norm_
@@ -86,6 +88,16 @@ class SACPID(SAC):
         n_step_cost: int = self._cfgs.algo_cfgs.get('n_step_cost', 1)
         retrace_lambda: float = self._cfgs.algo_cfgs.get('retrace_lambda', 0.0)
         retrace_n_steps: int = self._cfgs.algo_cfgs.get('retrace_n_steps', 5)
+        retrace_reward: bool = self._cfgs.algo_cfgs.get('retrace_reward_critic', False)
+        retrace_cost: bool = self._cfgs.algo_cfgs.get('retrace_cost_critic', True)
+
+        if retrace_lambda > 0.0 and not retrace_reward and not retrace_cost:
+            warnings.warn(
+                'retrace_lambda > 0 but both retrace_reward_critic and retrace_cost_critic '
+                'are False — Retrace is disabled. Set at least one flag to True.',
+                UserWarning,
+                stacklevel=2,
+            )
 
         for _ in range(self._cfgs.algo_cfgs.update_iters):
             data = self._buf.sample_batch()
@@ -99,7 +111,22 @@ class SACPID(SAC):
                 data['next_obs'],
             )
 
-            if recency_reward:
+            if retrace_lambda > 0.0 and retrace_reward:
+                r_data, r_idx, r_env_idx = self._buf.sample_batch_nstep_safe(retrace_n_steps)
+                retrace_r_targets = self._buf.compute_retrace_reward_targets(
+                    idx=r_idx,
+                    env_idx=r_env_idx,
+                    n_steps=retrace_n_steps,
+                    retrace_lambda=retrace_lambda,
+                    gamma=self._cfgs.algo_cfgs.gamma,
+                    target_reward_critic=self._actor_critic.target_reward_critic,
+                    actor=self._actor_critic.actor,
+                    alpha=self._alpha,
+                )
+                self._update_reward_critic_with_targets(
+                    r_data['obs'], r_data['act'], retrace_r_targets
+                )
+            elif recency_reward:
                 r_data = self._buf.sample_batch_recency_weighted(recency_decay)
                 self._update_reward_critic(
                     r_data['obs'],
@@ -112,7 +139,7 @@ class SACPID(SAC):
                 self._update_reward_critic(obs, act, reward, done, next_obs)
 
             if self._cfgs.algo_cfgs.use_cost:
-                if retrace_lambda > 0.0:
+                if retrace_lambda > 0.0 and retrace_cost:
                     c_data, c_idx, c_env_idx = self._buf.sample_batch_nstep_safe(retrace_n_steps)
                     retrace_targets = self._buf.compute_retrace_cost_targets(
                         idx=c_idx,
@@ -193,6 +220,45 @@ class SACPID(SAC):
                     'Value/RError': r_error,
                 },
             )
+
+    def _update_reward_critic_with_targets(
+        self,
+        obs: torch.Tensor,
+        action: torch.Tensor,
+        targets: torch.Tensor,
+    ) -> None:
+        """Update the reward critic against precomputed targets (e.g. Retrace returns).
+
+        Args:
+            obs (torch.Tensor): Observations sampled from the buffer.
+            action (torch.Tensor): Actions sampled from the buffer.
+            targets (torch.Tensor): Precomputed reward return targets, shape ``(B,)``.
+        """
+        q1_value_r, q2_value_r = self._actor_critic.reward_critic(obs, action)
+        loss = nn.functional.mse_loss(q1_value_r, targets) + nn.functional.mse_loss(
+            q2_value_r, targets
+        )
+
+        if self._cfgs.algo_cfgs.use_critic_norm:
+            for param in self._actor_critic.reward_critic.parameters():
+                loss += param.pow(2).sum() * self._cfgs.algo_cfgs.critic_norm_coeff
+
+        self._actor_critic.reward_critic_optimizer.zero_grad()
+        loss.backward()
+
+        if self._cfgs.algo_cfgs.max_grad_norm:
+            clip_grad_norm_(
+                self._actor_critic.reward_critic.parameters(),
+                self._cfgs.algo_cfgs.max_grad_norm,
+            )
+        self._actor_critic.reward_critic_optimizer.step()
+
+        self._logger.store(
+            {
+                'Loss/Loss_reward_critic': loss.mean().item(),
+                'Value/reward_critic': q1_value_r.mean().item(),
+            },
+        )
 
     def _update_cost_critic_with_targets(
         self,
