@@ -61,8 +61,6 @@ class SACPID(SAC):
         """
         super()._init_log()
         self._logger.register_key('Metrics/LagrangeMultiplier')
-        ep_cost_window: int = self._cfgs.algo_cfgs.get('ep_cost_window', 10)
-        self._logger.register_key('Metrics/EpCost', window_length=ep_cost_window)
         value_eval_freq = self._cfgs.algo_cfgs.get('value_eval_freq', 0)
         if value_eval_freq > 0:
             self._logger.register_key('Value/TrueC')
