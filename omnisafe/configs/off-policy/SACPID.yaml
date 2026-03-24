@@ -113,6 +113,13 @@ defaults:
     retrace_n_steps: 5
     retrace_reward_critic: False
     retrace_cost_critic: True
+    # PID Lagrange update frequency: call pid_update once every this many _update() calls.
+    # Default 1 preserves original behaviour; set to steps_per_epoch for once-per-epoch updates.
+    pid_update_freq: 1
+    # Sliding window length for Metrics/EpCost used as Jc in the PID controller.
+    # Larger values produce a smoother (but more delayed) cost signal.
+    # Overrides logger_cfgs.window_lens for EpCost only.
+    ep_cost_window: 10
   # logger configurations
   logger_cfgs:
     # use wandb for logging

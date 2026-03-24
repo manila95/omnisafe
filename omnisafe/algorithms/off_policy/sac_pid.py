@@ -61,6 +61,8 @@ class SACPID(SAC):
         """
         super()._init_log()
         self._logger.register_key('Metrics/LagrangeMultiplier')
+        ep_cost_window: int = self._cfgs.algo_cfgs.get('ep_cost_window', 10)
+        self._logger.register_key('Metrics/EpCost', window_length=ep_cost_window)
         value_eval_freq = self._cfgs.algo_cfgs.get('value_eval_freq', 0)
         if value_eval_freq > 0:
             self._logger.register_key('Value/TrueC')
@@ -185,11 +187,13 @@ class SACPID(SAC):
                 self._update_actor(obs)
                 self._actor_critic.polyak_update(self._cfgs.algo_cfgs.polyak)
 
-        Jc = self._logger.get_stats('Metrics/EpCost')[0]
-        if self._cfgs.algo_cfgs.get('cost_limit_normalize', False):
-            Jc = Jc / self._cfgs.lagrange_cfgs.cost_limit
-        if self._epoch > self._cfgs.algo_cfgs.warmup_epochs:
-            self._lagrange.pid_update(Jc)
+        pid_update_freq: int = self._cfgs.algo_cfgs.get('pid_update_freq', 1)
+        if self._update_count % pid_update_freq == 0:
+            Jc = self._logger.get_stats('Metrics/EpCost')[0]
+            if self._cfgs.algo_cfgs.get('cost_limit_normalize', False):
+                Jc = Jc / self._cfgs.lagrange_cfgs.cost_limit
+            if self._epoch > self._cfgs.algo_cfgs.warmup_epochs:
+                self._lagrange.pid_update(Jc)
         self._logger.store(
             {
                 'Metrics/LagrangeMultiplier': self._lagrange.lagrangian_multiplier,
