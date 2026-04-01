@@ -16,4 +16,5 @@
 
 from omnisafe.models.critic.critic_builder import CriticBuilder
 from omnisafe.models.critic.q_critic import QCritic
+from omnisafe.models.critic.quantile_critic import QuantileCritic
 from omnisafe.models.critic.v_critic import VCritic

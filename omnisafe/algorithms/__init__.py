@@ -25,6 +25,7 @@ from omnisafe.algorithms.model_based import CAPPETS, CCEPETS, LOOP, PETS, RCEPET
 
 # Off-Policy Safe
 from omnisafe.algorithms.off_policy import (
+    COXQ,
     CRABS,
     DDPG,
     DDPGPID,
