@@ -24,8 +24,8 @@ defaults:
     sim_timestep: 0.002
   # training configurations
   train_cfgs:
-    device: cpu
-    torch_threads: 16
+    device: cpu 
+    torch_threads: 16 
     vector_env_nums: 1
     parallel: 1
     total_steps: 1000000
@@ -72,7 +72,7 @@ defaults:
     # ── ALM (Augmented Lagrangian Method) ─────────────────────────────────────
     alm_coeff: 10.0        # c: convexification coefficient in ALM
   logger_cfgs:
-    use_wandb: False
+    use_wandb: True
     wandb_project: omnisafe
     use_tensorboard: True
     save_model_freq: 100
