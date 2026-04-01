@@ -26,6 +26,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 import torch
+import torch.distributions as D
 import torch.nn as nn
 from torch import optim
 from torch.optim.lr_scheduler import ConstantLR, LinearLR
@@ -254,7 +255,16 @@ class ConstraintActorQuantileCritic(nn.Module):
         # ── Sample exploration action ──────────────────────────────────────────
         mu_delta = eta_star.unsqueeze(-1) * var_T * g_star
         mu_E = mu_T_val + mu_delta
-        action = torch.tanh(mu_E + sigma_T * torch.randn_like(sigma_T))
+        eps = torch.randn_like(sigma_T)
+        raw_action = mu_E + sigma_T * eps       # pre-tanh sample
+        action = torch.tanh(raw_action)
+
+        # Set actor internal state so adapter can call actor.log_prob() afterwards.
+        # log_prob() uses _current_dist and _current_raw_action set by predict().
+        self.actor._current_dist = D.Normal(mu_E, sigma_T)
+        self.actor._current_raw_action = raw_action
+        self.actor._after_inference = True
+
         return action.clamp(-1.0, 1.0)
 
     # ── Public interface ───────────────────────────────────────────────────────

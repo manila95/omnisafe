@@ -164,6 +164,7 @@ class COXQ(BaseAlgo):
         wl = self._cfgs.logger_cfgs.window_lens
         for key in ('Metrics/EpRet', 'Metrics/EpCost', 'Metrics/EpLen'):
             self._logger.register_key(key, window_length=wl)
+        self._logger.register_key('Metrics/TotalCost')
 
         if self._cfgs.train_cfgs.eval_episodes > 0:
             for key in ('Metrics/TestEpRet', 'Metrics/TestEpCost', 'Metrics/TestEpLen'):
