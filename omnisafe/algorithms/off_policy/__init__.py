@@ -14,6 +14,7 @@
 # ==============================================================================
 """Off-policy algorithms."""
 
+from omnisafe.algorithms.off_policy.coxq import COXQ
 from omnisafe.algorithms.off_policy.crabs import CRABS
 from omnisafe.algorithms.off_policy.ddpg import DDPG
 from omnisafe.algorithms.off_policy.ddpg_lag import DDPGLag
@@ -39,4 +40,5 @@ __all__ = [
     'SACPID',
     'CRABS',
     'TRPOSACPID',
+    'COXQ',
 ]
