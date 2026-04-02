@@ -135,13 +135,17 @@ class SafetyGymnasiumEnv(CMDP):
         self._num_envs = num_envs
         self._device = torch.device(device)
         self._sim_timestep: float | None = kwargs.pop('sim_timestep', None)
-        # Ensure num_steps (task internal counter) matches max_episode_steps so both
-        # termination mechanisms are consistent. User only needs to set max_episode_steps.
-        if 'max_episode_steps' in kwargs and 'num_steps' not in kwargs:
-            kwargs['num_steps'] = kwargs['max_episode_steps']
-
+        # safety_gymnasium.make supports max_episode_steps as a top-level arg.
+        # Pop it from kwargs so it is not forwarded to env constructor kwargs.
+        max_episode_steps = kwargs.pop('max_episode_steps', None)
+        print(max_episode_steps)
         if num_envs > 1:
-            self._env = safety_gymnasium.vector.make(env_id=env_id, num_envs=num_envs, **kwargs)
+            self._env = safety_gymnasium.vector.make(
+                env_id=env_id,
+                num_envs=num_envs,
+                max_episode_steps=max_episode_steps,
+                **kwargs,
+            )
             assert isinstance(self._env.single_action_space, Box), 'Only support Box action space.'
             assert isinstance(
                 self._env.single_observation_space,
@@ -152,7 +156,12 @@ class SafetyGymnasiumEnv(CMDP):
         else:
             self.need_time_limit_wrapper = True
             self.need_auto_reset_wrapper = True
-            self._env = safety_gymnasium.make(id=env_id, autoreset=False, **kwargs)
+            self._env = safety_gymnasium.make(
+                id=env_id,
+                max_episode_steps=max_episode_steps,
+                autoreset=False,
+                **kwargs,
+            )
             assert isinstance(self._env.action_space, Box), 'Only support Box action space.'
             assert isinstance(
                 self._env.observation_space,
