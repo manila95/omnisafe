@@ -18,12 +18,20 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
+import gymnasium
 import numpy as np
 import safety_gymnasium
 import torch
 
 from omnisafe.envs.core import CMDP, env_register
 from omnisafe.typing import DEVICE_CPU, Box
+
+
+class _SimTimestepWrapper(gymnasium.Wrapper):
+    """Thin wrapper that exposes set_sim_timestep for use with vectorized envs."""
+
+    def set_sim_timestep(self, timestep: float) -> None:
+        self.unwrapped.task.model.opt.timestep = timestep
 
 
 @env_register
@@ -144,6 +152,7 @@ class SafetyGymnasiumEnv(CMDP):
                 env_id=env_id,
                 num_envs=num_envs,
                 max_episode_steps=max_episode_steps,
+                wrappers=_SimTimestepWrapper if self._sim_timestep is not None else None,
                 **kwargs,
             )
             assert isinstance(self._env.single_action_space, Box), 'Only support Box action space.'
@@ -240,7 +249,10 @@ class SafetyGymnasiumEnv(CMDP):
         """
         obs, info = self._env.reset(seed=seed, options=options)
         if self._sim_timestep is not None:
-            self._env.unwrapped.task.model.opt.timestep = self._sim_timestep
+            if self._num_envs == 1:
+                self._env.unwrapped.task.model.opt.timestep = self._sim_timestep
+            else:
+                self._env.call('set_sim_timestep', self._sim_timestep)
         return torch.as_tensor(obs, dtype=torch.float32, device=self._device), info
 
     @property
