@@ -28,10 +28,13 @@ from omnisafe.typing import DEVICE_CPU, Box
 
 
 class _SimTimestepWrapper(gymnasium.Wrapper):
-    """Thin wrapper that exposes set_sim_timestep for use with vectorized envs."""
+    """Thin wrapper that exposes set_sim_timestep and set_lidar_max_dist for use with vectorized envs."""
 
     def set_sim_timestep(self, timestep: float) -> None:
         self.unwrapped.task.model.opt.timestep = timestep
+
+    def set_lidar_max_dist(self, max_dist: float) -> None:
+        self.unwrapped.task.lidar_conf.max_dist = max_dist
 
 
 @env_register
@@ -143,18 +146,21 @@ class SafetyGymnasiumEnv(CMDP):
         self._num_envs = num_envs
         self._device = torch.device(device)
         self._sim_timestep: float | None = kwargs.pop('sim_timestep', None)
+        self._lidar_max_dist: float | None = kwargs.pop('lidar_max_dist', None)
         # safety_gymnasium.make supports max_episode_steps as a top-level arg.
         # Pop it from kwargs so it is not forwarded to env constructor kwargs.
         max_episode_steps = kwargs.pop('max_episode_steps', None)
-        print(max_episode_steps)
         if num_envs > 1:
+            need_wrapper = self._sim_timestep is not None or self._lidar_max_dist is not None
             self._env = safety_gymnasium.vector.make(
                 env_id=env_id,
                 num_envs=num_envs,
                 max_episode_steps=max_episode_steps,
-                wrappers=_SimTimestepWrapper if self._sim_timestep is not None else None,
+                wrappers=_SimTimestepWrapper if need_wrapper else None,
                 **kwargs,
             )
+            if self._lidar_max_dist is not None:
+                self._env.call('set_lidar_max_dist', self._lidar_max_dist)
             assert isinstance(self._env.single_action_space, Box), 'Only support Box action space.'
             assert isinstance(
                 self._env.single_observation_space,
@@ -171,6 +177,8 @@ class SafetyGymnasiumEnv(CMDP):
                 autoreset=False,
                 **kwargs,
             )
+            if self._lidar_max_dist is not None:
+                self._env.unwrapped.task.lidar_conf.max_dist = self._lidar_max_dist
             assert isinstance(self._env.action_space, Box), 'Only support Box action space.'
             assert isinstance(
                 self._env.observation_space,
