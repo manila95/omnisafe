@@ -77,6 +77,10 @@ defaults:
     auto_alpha: False
     # use cost
     use_cost: False
+    # evaluate true vs estimated values every N epochs (0 = disabled)
+    value_eval_freq: 0
+    # number of episodes per value evaluation
+    eval_episodes: 100
   # logger configurations
   logger_cfgs:
     # use wandb for logging

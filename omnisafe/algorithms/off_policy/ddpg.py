@@ -26,6 +26,7 @@ from torch.nn.utils.clip_grad import clip_grad_norm_
 from omnisafe.adapter import OffPolicyAdapter
 from omnisafe.algorithms import registry
 from omnisafe.algorithms.base_algo import BaseAlgo
+from omnisafe.algorithms.off_policy.utils import estimate_true_qvalue
 from omnisafe.common.buffer import VectorOffPolicyBuffer
 from omnisafe.common.logger import Logger
 from omnisafe.models.actor_critic.constraint_actor_q_critic import ConstraintActorQCritic
@@ -131,6 +132,7 @@ class DDPG(BaseAlgo):
             penalty_coefficient=self._cfgs.algo_cfgs.get('penalty_coefficient', 0.0),
             device=self._device,
         )
+        self._last_value_eval_epoch: int = -1
 
     def _init_log(self) -> None:
         """Log info about epoch.
@@ -252,6 +254,14 @@ class DDPG(BaseAlgo):
         for env_spec_key in self._env.env_spec_keys:
             self.logger.register_key(env_spec_key)
 
+        if self._cfgs.algo_cfgs.get('value_eval_freq', 0) > 0:
+            self._logger.register_key('Value/TrueR')
+            self._logger.register_key('Value/EstimateR')
+            self._logger.register_key('Value/RError')
+            self._logger.register_key('Value/TrueC')
+            self._logger.register_key('Value/EstimateC')
+            self._logger.register_key('Value/CError')
+
     def learn(self) -> tuple[float, float, float]:
         """This is main function for algorithm update.
 
@@ -311,6 +321,7 @@ class DDPG(BaseAlgo):
                 agent=self._actor_critic,
                 logger=self._logger,
             )
+            self._evaluate_value()
             eval_time = time.time() - eval_start
 
             self._logger.store({'Time/Update': update_time})
@@ -347,6 +358,34 @@ class DDPG(BaseAlgo):
         self._env.close()
 
         return ep_ret, ep_cost, ep_len
+
+    def _evaluate_value(self) -> None:
+        """Evaluate true vs estimated Q-values at the current epoch if value_eval_freq is set."""
+        value_eval_freq = self._cfgs.algo_cfgs.get('value_eval_freq', 0)
+        if (
+            value_eval_freq > 0
+            and self._epoch % value_eval_freq == 0
+            and self._epoch != self._last_value_eval_epoch
+        ):
+            self._last_value_eval_epoch = self._epoch
+            c_error, true_c, est_c, r_error, true_r, est_r = estimate_true_qvalue(
+                actor_critic=self._actor_critic,
+                adapter=self._env,
+                logger=self._logger,
+                discount=self._cfgs.algo_cfgs.gamma,
+                eval_episodes=self._cfgs.algo_cfgs.get('eval_episodes', 10),
+                step=self._epoch * self._cfgs.algo_cfgs.steps_per_epoch,
+            )
+            self._logger.store(
+                {
+                    'Value/TrueC': true_c,
+                    'Value/EstimateC': est_c,
+                    'Value/CError': c_error,
+                    'Value/TrueR': true_r,
+                    'Value/EstimateR': est_r,
+                    'Value/RError': r_error,
+                },
+            )
 
     def _update(self) -> None:
         """Update actor, critic.

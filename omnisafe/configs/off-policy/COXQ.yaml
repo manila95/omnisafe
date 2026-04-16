@@ -54,6 +54,10 @@ defaults:
     auto_alpha: True
     # ── Cost handling ──────────────────────────────────────────────────────────
     use_cost: True
+    # evaluate true vs estimated values every N epochs (0 = disabled)
+    value_eval_freq: 0
+    # number of episodes per value evaluation
+    eval_episodes: 100
     warmup_epochs: 0       # start Lagrange updates immediately
     episode_len: 1000      # T for converting episode cost → Q-value limit
     # ── TQC quantile critic parameters ────────────────────────────────────────

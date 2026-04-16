@@ -82,6 +82,10 @@ defaults:
     penalty_coef: 0.0
     # use cost
     use_cost: False
+    # evaluate true vs estimated values every N epochs (0 = disabled)
+    value_eval_freq: 0
+    # number of episodes per value evaluation
+    eval_episodes: 100
     # Damping value for conjugate gradient
     cg_damping: 0.1
     # Number of conjugate gradient iterations
@@ -93,7 +97,7 @@ defaults:
   # logger configurations
   logger_cfgs:
     # use wandb for logging
-    use_wandb: False
+    use_wandb: True
     # wandb project name
     wandb_project: omnisafe
     # use tensorboard for logging

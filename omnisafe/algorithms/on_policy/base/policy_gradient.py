@@ -28,6 +28,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from omnisafe.adapter import OnPolicyAdapter
 from omnisafe.algorithms import registry
 from omnisafe.algorithms.base_algo import BaseAlgo
+from omnisafe.algorithms.off_policy.utils import estimate_true_value
 from omnisafe.common.buffer import VectorOnPolicyBuffer
 from omnisafe.common.logger import Logger
 from omnisafe.models.actor_critic.constraint_actor_critic import ConstraintActorCritic
@@ -44,6 +45,8 @@ class PolicyGradient(BaseAlgo):
         - Authors: Richard S. Sutton, David McAllester, Satinder Singh, Yishay Mansour.
         - URL: `PG <https://proceedings.neurips.cc/paper/1999/file64d828b85b0bed98e80ade0a5c43b0f-Paper.pdf>`_
     """
+
+    _epoch: int
 
     def _init_env(self) -> None:
         """Initialize the environment.
@@ -129,6 +132,7 @@ class PolicyGradient(BaseAlgo):
             num_envs=self._cfgs.train_cfgs.vector_env_nums,
             device=self._device,
         )
+        self._last_value_eval_epoch: int = -1
 
     def _init_log(self) -> None:
         """Log info about epoch.
@@ -236,6 +240,14 @@ class PolicyGradient(BaseAlgo):
         for env_spec_key in self._env.env_spec_keys:
             self.logger.register_key(env_spec_key)
 
+        if self._cfgs.algo_cfgs.get('value_eval_freq', 0) > 0:
+            self._logger.register_key('Value/TrueR')
+            self._logger.register_key('Value/EstimateR')
+            self._logger.register_key('Value/RError')
+            self._logger.register_key('Value/TrueC')
+            self._logger.register_key('Value/EstimateC')
+            self._logger.register_key('Value/CError')
+
     def learn(self) -> tuple[float, float, float]:
         """This is main function for algorithm update.
 
@@ -254,6 +266,7 @@ class PolicyGradient(BaseAlgo):
         self._logger.log('INFO: Start training')
 
         for epoch in range(self._cfgs.train_cfgs.epochs):
+            self._epoch = epoch
             epoch_time = time.time()
 
             rollout_time = time.time()
@@ -268,6 +281,7 @@ class PolicyGradient(BaseAlgo):
             update_time = time.time()
             self._update()
             self._logger.store({'Time/Update': time.time() - update_time})
+            self._evaluate_value()
 
             if self._cfgs.model_cfgs.exploration_noise_anneal:
                 self._actor_critic.annealing(epoch)
@@ -305,6 +319,34 @@ class PolicyGradient(BaseAlgo):
         self._env.close()
 
         return ep_ret, ep_cost, ep_len
+
+    def _evaluate_value(self) -> None:
+        """Evaluate true vs estimated values at the current epoch if value_eval_freq is set."""
+        value_eval_freq = self._cfgs.algo_cfgs.get('value_eval_freq', 0)
+        if (
+            value_eval_freq > 0
+            and self._epoch % value_eval_freq == 0
+            and self._epoch != self._last_value_eval_epoch
+        ):
+            self._last_value_eval_epoch = self._epoch
+            c_error, true_c, est_c, r_error, true_r, est_r = estimate_true_value(
+                actor_critic=self._actor_critic,
+                adapter=self._env,
+                logger=self._logger,
+                discount=self._cfgs.algo_cfgs.gamma,
+                eval_episodes=self._cfgs.algo_cfgs.get('eval_episodes', 10),
+                step=self._epoch * self._cfgs.algo_cfgs.steps_per_epoch,
+            )
+            self._logger.store(
+                {
+                    'Value/TrueC': true_c,
+                    'Value/EstimateC': est_c,
+                    'Value/CError': c_error,
+                    'Value/TrueR': true_r,
+                    'Value/EstimateR': est_r,
+                    'Value/RError': r_error,
+                },
+            )
 
     def _update(self) -> None:
         """Update actor, critic.

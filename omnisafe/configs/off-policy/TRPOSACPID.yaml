@@ -48,6 +48,10 @@ defaults:
     alpha: 0.2
     auto_alpha: False
     use_cost: True
+    # evaluate true vs estimated values every N epochs (0 = disabled)
+    value_eval_freq: 0
+    # number of episodes per value evaluation
+    eval_episodes: 100
     warmup_epochs: 100
     # Phase 1: number of Q-critic update iterations per warmup epoch (off-policy critics)
     phase1_q_update_iters: 4
