@@ -86,6 +86,20 @@ if __name__ == '__main__':
         metavar='DECAY',
         help='per-epoch multiplicative decay for adv inflation (1.0=no decay, 0.99=slow decay)',
     )
+    parser.add_argument(
+        '--lagrangian-multiplier-init',
+        type=float,
+        default=None,
+        metavar='LAMBDA',
+        help='initial value of the Lagrangian multiplier',
+    )
+    parser.add_argument(
+        '--pid-kp',
+        type=float,
+        default=None,
+        metavar='KP',
+        help='proportional gain of the PID Lagrangian controller',
+    )
     args, unparsed_args = parser.parse_known_args()
     keys = [k[2:] for k in unparsed_args[0::2]]
     values = list(unparsed_args[1::2])
@@ -93,9 +107,13 @@ if __name__ == '__main__':
 
     adv_inflation_coeff = args.adv_inflation_coeff
     adv_inflation_decay = args.adv_inflation_decay
+    lagrangian_multiplier_init = args.lagrangian_multiplier_init
+    pid_kp = args.pid_kp
     terminal_cfgs = vars(args)
     del terminal_cfgs['adv_inflation_coeff']
     del terminal_cfgs['adv_inflation_decay']
+    del terminal_cfgs['lagrangian_multiplier_init']
+    del terminal_cfgs['pid_kp']
 
     custom_cfgs = {}
     for k, v in unparsed_args.items():
@@ -104,6 +122,10 @@ if __name__ == '__main__':
         update_dict(custom_cfgs, custom_cfgs_to_dict('algo_cfgs:adv_inflation_coeff', str(adv_inflation_coeff)))
     if adv_inflation_decay is not None:
         update_dict(custom_cfgs, custom_cfgs_to_dict('algo_cfgs:adv_inflation_decay', str(adv_inflation_decay)))
+    if lagrangian_multiplier_init is not None:
+        update_dict(custom_cfgs, custom_cfgs_to_dict('lagrange_cfgs:lagrangian_multiplier_init', str(lagrangian_multiplier_init)))
+    if pid_kp is not None:
+        update_dict(custom_cfgs, custom_cfgs_to_dict('lagrange_cfgs:pid_kp', str(pid_kp)))
 
     agent = omnisafe.Agent(
         args.algo,
@@ -111,4 +133,5 @@ if __name__ == '__main__':
         train_terminal_cfgs=terminal_cfgs,
         custom_cfgs=custom_cfgs,
     )
+    print(agent.cfgs)
     agent.learn()
