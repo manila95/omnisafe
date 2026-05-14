@@ -35,6 +35,7 @@ class TRPOPID(TRPO):
         """
         super()._init()
         self._lagrange: PIDLagrangian = PIDLagrangian(**self._cfgs.lagrange_cfgs)
+        self._epoch: int = 0
 
     def _init_log(self) -> None:
         """Log the TRPOPID specific information.
@@ -47,6 +48,7 @@ class TRPOPID(TRPO):
         """
         super()._init_log()
         self._logger.register_key('Metrics/LagrangeMultiplier')
+        self._logger.register_key('Metrics/AdvInflation')
 
     def _update(self) -> None:
         r"""Update actor, critic, as we used in the :class:`PolicyGradient` algorithm.
@@ -75,7 +77,20 @@ class TRPOPID(TRPO):
         # then update the policy and value function
         super()._update()
 
-        self._logger.store({'Metrics/LagrangeMultiplier': self._lagrange.lagrangian_multiplier})
+        inflation = self._adv_inflation()
+        self._logger.store(
+            {
+                'Metrics/LagrangeMultiplier': self._lagrange.lagrangian_multiplier,
+                'Metrics/AdvInflation': inflation,
+            },
+        )
+        self._epoch += 1
+
+    def _adv_inflation(self) -> float:
+        """Return the current advantage inflation value, decayed exponentially by epoch."""
+        coeff = self._cfgs.algo_cfgs.adv_inflation_coeff
+        decay = self._cfgs.algo_cfgs.adv_inflation_decay
+        return coeff * (decay**self._epoch)
 
     def _compute_adv_surrogate(self, adv_r: torch.Tensor, adv_c: torch.Tensor) -> torch.Tensor:
         r"""Compute surrogate loss.
@@ -85,7 +100,10 @@ class TRPOPID(TRPO):
         .. math::
 
             L = \frac{1}{1 + \lambda} [A^{R}_{\pi_{\theta}}(s, a)
-            - \lambda A^C_{\pi_{\theta}}(s, a)]
+            - \lambda A^C_{\pi_{\theta}}(s, a)] + \epsilon_t
+
+        where :math:`\epsilon_t = \text{adv\_inflation\_coeff} \times \text{adv\_inflation\_decay}^t`
+        is an epoch-decayed constant bonus added to inflate the combined advantage.
 
         Args:
             adv_r (torch.Tensor): The ``reward_advantage`` sampled from buffer.
@@ -95,4 +113,5 @@ class TRPOPID(TRPO):
             The ``advantage`` combined with ``reward_advantage`` and ``cost_advantage``.
         """
         penalty = self._lagrange.lagrangian_multiplier
-        return (adv_r - penalty * adv_c) / (1 + penalty)
+        inflation = self._adv_inflation()
+        return (adv_r - penalty * (adv_c + inflation)) / (1 + penalty)

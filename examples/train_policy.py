@@ -72,19 +72,43 @@ if __name__ == '__main__':
         metavar='THREADS',
         help='number of threads to use for torch',
     )
+    parser.add_argument(
+        '--adv-inflation-coeff',
+        type=float,
+        default=None,
+        metavar='COEFF',
+        help='constant bonus added to TRPOPID advantage (0.0 disables)',
+    )
+    parser.add_argument(
+        '--adv-inflation-decay',
+        type=float,
+        default=None,
+        metavar='DECAY',
+        help='per-epoch multiplicative decay for adv inflation (1.0=no decay, 0.99=slow decay)',
+    )
     args, unparsed_args = parser.parse_known_args()
     keys = [k[2:] for k in unparsed_args[0::2]]
     values = list(unparsed_args[1::2])
     unparsed_args = dict(zip(keys, values))
 
+    adv_inflation_coeff = args.adv_inflation_coeff
+    adv_inflation_decay = args.adv_inflation_decay
+    terminal_cfgs = vars(args)
+    del terminal_cfgs['adv_inflation_coeff']
+    del terminal_cfgs['adv_inflation_decay']
+
     custom_cfgs = {}
     for k, v in unparsed_args.items():
         update_dict(custom_cfgs, custom_cfgs_to_dict(k, v))
+    if adv_inflation_coeff is not None:
+        update_dict(custom_cfgs, custom_cfgs_to_dict('algo_cfgs:adv_inflation_coeff', str(adv_inflation_coeff)))
+    if adv_inflation_decay is not None:
+        update_dict(custom_cfgs, custom_cfgs_to_dict('algo_cfgs:adv_inflation_decay', str(adv_inflation_decay)))
 
     agent = omnisafe.Agent(
         args.algo,
         args.env_id,
-        train_terminal_cfgs=vars(args),
+        train_terminal_cfgs=terminal_cfgs,
         custom_cfgs=custom_cfgs,
     )
     agent.learn()

@@ -76,6 +76,10 @@ defaults:
     penalty_coef: 0.0
     # use cost
     use_cost: True
+    # constant added to advantage to inflate exploration; 0.0 disables
+    adv_inflation_coeff: 0.0
+    # multiplicative decay factor applied per epoch (1.0 = no decay, 0 < x < 1 = exponential decay)
+    adv_inflation_decay: 1.0
     # Damping value for conjugate gradient
     cg_damping: 0.1
     # Number of conjugate gradient iterations
