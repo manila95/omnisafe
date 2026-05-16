@@ -100,6 +100,13 @@ if __name__ == '__main__':
         metavar='KP',
         help='proportional gain of the PID Lagrangian controller',
     )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=42,
+        metavar='SEED',
+        help='random seed',
+    )
     args, unparsed_args = parser.parse_known_args()
     keys = [k[2:] for k in unparsed_args[0::2]]
     values = list(unparsed_args[1::2])
@@ -130,6 +137,7 @@ if __name__ == '__main__':
     agent = omnisafe.Agent(
         args.algo,
         args.env_id,
+        args.seed,
         train_terminal_cfgs=terminal_cfgs,
         custom_cfgs=custom_cfgs,
     )
