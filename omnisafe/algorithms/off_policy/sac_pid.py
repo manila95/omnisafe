@@ -14,6 +14,7 @@
 # ==============================================================================
 """Implementation of the SACPID (PID version of SACLag) algorithm."""
 
+from __future__ import annotations
 
 import torch
 
