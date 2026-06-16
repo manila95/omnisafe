@@ -78,6 +78,13 @@ defaults:
     use_cost: True
     # warm up epoch
     warmup_epochs: 100
+    # Q-critic calibration: log diagnostics every N epochs
+    value_eval_freq: 10
+    # Q-critic calibration: number of replay-buffer transitions to sample
+    q_diag_batch_size: 4096
+    # Q-critic calibration: number of eval episodes for true-return comparison
+    # (each episode contributes one point per timestep, not just episode start)
+    q_diag_eval_episodes: 10
   # logger configurations
   logger_cfgs:
     # use wandb for logging

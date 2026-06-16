@@ -18,14 +18,19 @@ from __future__ import annotations
 
 import atexit
 import csv
+import io
 import os
 import time
 from collections import deque
 from typing import Any, TextIO
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import wandb
+from PIL import Image
 from rich import print  # pylint: disable=redefined-builtin,wrong-import-order
 from rich.console import Console  # pylint: disable=wrong-import-order
 from rich.table import Table  # pylint: disable=wrong-import-order
@@ -382,6 +387,56 @@ class Logger:  # pylint: disable=too-many-instance-attributes
     def log_dir(self) -> str:
         """Return the log directory."""
         return self._log_dir
+
+    def log_scatter_image(
+        self,
+        key: str,
+        x_values: 'np.ndarray | torch.Tensor',
+        y_values: 'np.ndarray | torch.Tensor',
+        xlabel: str = 'x',
+        ylabel: str = 'y',
+        step: int | None = None,
+        c_values: 'np.ndarray | torch.Tensor | None' = None,
+        c_label: str = 'value',
+    ) -> None:
+        """Log a scatter plot as an image to tensorboard and/or wandb."""
+        if not self._maste_proc:
+            return
+        if step is None:
+            step = self._epoch
+        x_vals = x_values.cpu().numpy() if isinstance(x_values, torch.Tensor) else np.asarray(x_values)
+        y_vals = y_values.cpu().numpy() if isinstance(y_values, torch.Tensor) else np.asarray(y_values)
+        x_vals = np.atleast_1d(x_vals).flatten()
+        y_vals = np.atleast_1d(y_vals).flatten()
+        n = min(len(x_vals), len(y_vals))
+        if n == 0:
+            return
+        x_vals, y_vals = x_vals[:n], y_vals[:n]
+
+        fig, ax = plt.subplots(figsize=(6, 4))
+        if c_values is not None:
+            c_vals = c_values.cpu().numpy() if isinstance(c_values, torch.Tensor) else np.asarray(c_values)
+            c_vals = np.atleast_1d(c_vals).flatten()[:n]
+            sc = ax.scatter(x_vals, y_vals, c=c_vals, alpha=0.5, s=10, cmap='viridis')
+            plt.colorbar(sc, ax=ax, label=c_label)
+        else:
+            ax.scatter(x_vals, y_vals, alpha=0.5, s=10)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(f'{key} (step {step})')
+        fig.tight_layout()
+
+        if self._use_tensorboard:
+            self._tensorboard_writer.add_figure(key, fig, global_step=step)
+
+        if self._use_wandb:
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+            buf.seek(0)
+            img = np.array(Image.open(buf))
+            wandb.log({key: wandb.Image(img)}, step=step)
+
+        plt.close(fig)
 
     def close(self) -> None:
         """Close the logger."""

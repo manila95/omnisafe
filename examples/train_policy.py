@@ -107,6 +107,13 @@ if __name__ == '__main__':
         metavar='SEED',
         help='random seed',
     )
+    parser.add_argument(
+        '--warmup-epochs',
+        type=int,
+        default=None,
+        metavar='EPOCHS',
+        help='number of epochs before the PID Lagrange multiplier starts updating',
+    )
     args, unparsed_args = parser.parse_known_args()
     keys = [k[2:] for k in unparsed_args[0::2]]
     values = list(unparsed_args[1::2])
@@ -116,11 +123,13 @@ if __name__ == '__main__':
     adv_inflation_decay = args.adv_inflation_decay
     lagrangian_multiplier_init = args.lagrangian_multiplier_init
     pid_kp = args.pid_kp
+    warmup_epochs = args.warmup_epochs
     terminal_cfgs = vars(args)
     del terminal_cfgs['adv_inflation_coeff']
     del terminal_cfgs['adv_inflation_decay']
     del terminal_cfgs['lagrangian_multiplier_init']
     del terminal_cfgs['pid_kp']
+    del terminal_cfgs['warmup_epochs']
 
     custom_cfgs = {}
     for k, v in unparsed_args.items():
@@ -133,6 +142,8 @@ if __name__ == '__main__':
         update_dict(custom_cfgs, custom_cfgs_to_dict('lagrange_cfgs:lagrangian_multiplier_init', str(lagrangian_multiplier_init)))
     if pid_kp is not None:
         update_dict(custom_cfgs, custom_cfgs_to_dict('lagrange_cfgs:pid_kp', str(pid_kp)))
+    if warmup_epochs is not None:
+        update_dict(custom_cfgs, custom_cfgs_to_dict('algo_cfgs:warmup_epochs', str(warmup_epochs)))
 
     agent = omnisafe.Agent(
         args.algo,
