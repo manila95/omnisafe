@@ -204,23 +204,37 @@ class NaturalPG(PolicyGradient):
             data['adv_r'],
             data['adv_c'],
         )
+
+        if self._sr_td_ridge:
+            self._ridge_update_successor_weights(data)
+            target_sr = data['target_sr']
+
         self._update_actor(obs, act, logp, adv_r, adv_c)
 
-        dataloader = DataLoader(
-            dataset=TensorDataset(obs, target_value_r, target_value_c),
-            batch_size=self._cfgs.algo_cfgs.batch_size,
-            shuffle=True,
-        )
+        if self._sr_td_ridge:
+            dataloader = DataLoader(
+                dataset=TensorDataset(obs, target_value_r, target_value_c, target_sr),
+                batch_size=self._cfgs.algo_cfgs.batch_size,
+                shuffle=True,
+            )
+        else:
+            dataloader = DataLoader(
+                dataset=TensorDataset(obs, target_value_r, target_value_c),
+                batch_size=self._cfgs.algo_cfgs.batch_size,
+                shuffle=True,
+            )
 
         for _ in range(self._cfgs.algo_cfgs.update_iters):
-            for (
-                obs,
-                target_value_r,
-                target_value_c,
-            ) in dataloader:
+            for batch in dataloader:
+                if self._sr_td_ridge:
+                    obs, target_value_r, target_value_c, target_sr = batch
+                else:
+                    obs, target_value_r, target_value_c = batch
                 self._update_reward_critic(obs, target_value_r)
                 if self._cfgs.algo_cfgs.use_cost:
                     self._update_cost_critic(obs, target_value_c)
+                if self._sr_td_ridge:
+                    self._update_successor_features(obs, target_sr)
 
         self._logger.store(
             {

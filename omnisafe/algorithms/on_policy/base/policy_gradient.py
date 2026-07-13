@@ -115,6 +115,12 @@ class PolicyGradient(BaseAlgo):
             ...     self._buffer = CustomBuffer()
             ...     self._model = CustomModel()
         """
+        use_sr = bool(self._cfgs.model_cfgs.get('use_successor_representation', False))
+        self._sr_td_ridge: bool = use_sr and self._cfgs.model_cfgs.sr_cfgs.get(
+            'sr_mode',
+            'shared_trunk',
+        ) == 'td_ridge'
+
         self._buf: VectorOnPolicyBuffer = VectorOnPolicyBuffer(
             obs_space=self._env.observation_space,
             act_space=self._env.action_space,
@@ -128,6 +134,9 @@ class PolicyGradient(BaseAlgo):
             penalty_coefficient=self._cfgs.algo_cfgs.penalty_coef,
             num_envs=self._cfgs.train_cfgs.vector_env_nums,
             device=self._device,
+            sr_dim=self._cfgs.model_cfgs.sr_cfgs.sr_dim if self._sr_td_ridge else None,
+            lam_sr=self._cfgs.model_cfgs.sr_cfgs.get('lam_sr', 0.95) if self._sr_td_ridge else 0.95,
+            gamma_sr=self._cfgs.model_cfgs.sr_cfgs.get('gamma_sr', None) if self._sr_td_ridge else None,
         )
 
     def _init_log(self) -> None:
@@ -224,6 +233,15 @@ class PolicyGradient(BaseAlgo):
             # log information about cost critic
             self._logger.register_key('Loss/Loss_cost_critic', delta=True)
             self._logger.register_key('Value/cost')
+
+        if self._sr_td_ridge:
+            # log information about the td_ridge successor-representation critic
+            self._logger.register_key('Loss/Loss_sr', delta=True)
+            self._logger.register_key('Misc/RidgeResidualReward')
+            self._logger.register_key('Misc/RidgeResidualCost')
+            self._logger.register_key('Misc/WrNorm')
+            self._logger.register_key('Misc/WcNorm')
+            self._logger.register_key('Misc/GramCond')
 
         self._logger.register_key('Time/Total')
         self._logger.register_key('Time/Rollout')
@@ -353,31 +371,49 @@ class PolicyGradient(BaseAlgo):
             data['adv_c'],
         )
 
+        if self._sr_td_ridge:
+            self._ridge_update_successor_weights(data)
+            target_sr = data['target_sr']
+
         original_obs = obs
         old_distribution = self._actor_critic.actor(obs)
 
-        dataloader = DataLoader(
-            dataset=TensorDataset(obs, act, logp, target_value_r, target_value_c, adv_r, adv_c),
-            batch_size=self._cfgs.algo_cfgs.batch_size,
-            shuffle=True,
-        )
+        if self._sr_td_ridge:
+            dataloader = DataLoader(
+                dataset=TensorDataset(
+                    obs,
+                    act,
+                    logp,
+                    target_value_r,
+                    target_value_c,
+                    adv_r,
+                    adv_c,
+                    target_sr,
+                ),
+                batch_size=self._cfgs.algo_cfgs.batch_size,
+                shuffle=True,
+            )
+        else:
+            dataloader = DataLoader(
+                dataset=TensorDataset(obs, act, logp, target_value_r, target_value_c, adv_r, adv_c),
+                batch_size=self._cfgs.algo_cfgs.batch_size,
+                shuffle=True,
+            )
 
         update_counts = 0
         final_kl = 0.0
 
         for i in track(range(self._cfgs.algo_cfgs.update_iters), description='Updating...'):
-            for (
-                obs,
-                act,
-                logp,
-                target_value_r,
-                target_value_c,
-                adv_r,
-                adv_c,
-            ) in dataloader:
+            for batch in dataloader:
+                if self._sr_td_ridge:
+                    obs, act, logp, target_value_r, target_value_c, adv_r, adv_c, target_sr = batch
+                else:
+                    obs, act, logp, target_value_r, target_value_c, adv_r, adv_c = batch
                 self._update_reward_critic(obs, target_value_r)
                 if self._cfgs.algo_cfgs.use_cost:
                     self._update_cost_critic(obs, target_value_c)
+                if self._sr_td_ridge:
+                    self._update_successor_features(obs, target_sr)
                 self._update_actor(obs, act, logp, adv_r, adv_c)
 
             new_distribution = self._actor_critic.actor(original_obs)
@@ -483,6 +519,61 @@ class PolicyGradient(BaseAlgo):
         self._actor_critic.cost_critic_optimizer.step()
 
         self._logger.store({'Loss/Loss_cost_critic': loss.mean().item()})
+
+    def _ridge_update_successor_weights(self, data: dict[str, torch.Tensor]) -> None:
+        """Refresh the ``td_ridge`` successor-representation read-out weights.
+
+        Solves ``w_r`` / ``w_c`` in closed form on the fresh epoch batch, once per
+        :meth:`_update` call (not per minibatch), mirroring how the buffer's GAE targets are
+        also computed once per epoch from the just-collected data.
+
+        Args:
+            data (dict[str, torch.Tensor]): The full epoch batch returned by ``self._buf.get()``,
+                including the ``phi``, ``reward``, and ``cost`` fields used for the ridge solve.
+        """
+        sr_cfgs = self._cfgs.model_cfgs.sr_cfgs
+        stats = self._actor_critic.sr_trunk.ridge_update(
+            data['phi'],
+            data['reward'],
+            data['cost'],
+            ridge_kappa=sr_cfgs.get('ridge_kappa', 1e-3),
+            ema_tau=sr_cfgs.get('ema_tau', 1.0),
+        )
+        self._logger.store(stats)
+
+    def _update_successor_features(self, obs: torch.Tensor, target_sr: torch.Tensor) -> None:
+        r"""Update the ``td_ridge`` successor-representation trunk under a double for loop.
+
+        Trains ``psi`` to satisfy the successor-representation Bellman recursion via MSE
+        against ``target_sr``, the buffer's discounted lambda-target built with the exact same
+        GAE / GAE-RTG / V-trace / Plain machinery used for the reward and cost value targets
+        (see :meth:`omnisafe.common.buffer.onpolicy_buffer.OnPolicyBuffer.finish_path`),
+        applied to the vector-valued feature stream ``phi`` instead of a scalar reward/cost
+        stream.
+
+        Args:
+            obs (torch.Tensor): The ``observation`` sampled from buffer.
+            target_sr (torch.Tensor): The ``target_sr`` sampled from buffer.
+        """
+        self._actor_critic.sr_optimizer.zero_grad()
+        psi = self._actor_critic.sr_trunk.psi(obs)
+        loss = nn.functional.mse_loss(psi, target_sr)
+
+        if self._cfgs.algo_cfgs.use_critic_norm:
+            for param in self._actor_critic.sr_trunk.parameters():
+                loss += param.pow(2).sum() * self._cfgs.algo_cfgs.critic_norm_coef
+
+        loss.backward()
+
+        if self._cfgs.algo_cfgs.use_max_grad_norm:
+            clip_grad_norm_(
+                self._actor_critic.sr_trunk.parameters(),
+                self._cfgs.algo_cfgs.max_grad_norm,
+            )
+        distributed.avg_grads(self._actor_critic.sr_trunk)
+        self._actor_critic.sr_optimizer.step()
+
+        self._logger.store({'Loss/Loss_sr': loss.mean().item()})
 
     def _update_actor(  # pylint: disable=too-many-arguments
         self,

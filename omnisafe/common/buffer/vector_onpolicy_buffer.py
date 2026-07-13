@@ -65,6 +65,9 @@ class VectorOnPolicyBuffer(OnPolicyBuffer):
         standardized_adv_c: bool,
         num_envs: int = 1,
         device: torch.device = DEVICE_CPU,
+        sr_dim: int | None = None,
+        lam_sr: float = 0.95,
+        gamma_sr: float | None = None,
     ) -> None:
         """Initialize an instance of :class:`VectorOnPolicyBuffer`."""
         self._num_buffers: int = num_envs
@@ -84,6 +87,9 @@ class VectorOnPolicyBuffer(OnPolicyBuffer):
                 advantage_estimator=advantage_estimator,
                 penalty_coefficient=penalty_coefficient,
                 device=device,
+                sr_dim=sr_dim,
+                lam_sr=lam_sr,
+                gamma_sr=gamma_sr,
             )
             for _ in range(num_envs)
         ]
@@ -103,12 +109,13 @@ class VectorOnPolicyBuffer(OnPolicyBuffer):
         last_value_r: torch.Tensor | None = None,
         last_value_c: torch.Tensor | None = None,
         idx: int = 0,
+        last_psi: torch.Tensor | None = None,
     ) -> None:
         """Get the data in the buffer.
 
         In vector-on-policy buffer, we get the data from each buffer and then concatenate them.
         """
-        self.buffers[idx].finish_path(last_value_r, last_value_c)
+        self.buffers[idx].finish_path(last_value_r, last_value_c, last_psi)
 
     def get(self) -> dict[str, torch.Tensor]:
         """Get the data in the buffer.

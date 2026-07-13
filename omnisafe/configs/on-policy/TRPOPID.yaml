@@ -126,6 +126,35 @@ defaults:
       activation: tanh
       # learning rate
       lr: 0.001
+    # whether to use a shared successor-representation value function for reward and cost,
+    # instead of two independent critics
+    use_successor_representation: False
+    # successor representation configurations, only used when use_successor_representation is True
+    sr_cfgs:
+      # 'shared_trunk': shared feature trunk + linear reward/cost read-out heads, trained
+      # end-to-end by the ordinary value-target MSE loss (reuses the stock GAE / GAE-RTG /
+      # V-trace / Plain value-target code exactly).
+      # 'td_ridge': literal successor representation -- phi/psi trained by TD (using the same
+      # estimator machinery above, applied to a vector feature stream), with the reward/cost
+      # read-out weights solved by closed-form ridge regression each update.
+      sr_mode: shared_trunk
+      # dimensionality of the shared successor-feature vector
+      sr_dim: 64
+      # hidden layer sizes of the shared trunk / psi network
+      hidden_sizes: [64, 64]
+      # activation function of the trunk
+      activation: tanh
+      # learning rate for the trunk (shared_trunk mode) or the psi network (td_ridge mode)
+      lr: 0.0003
+      # lambda for the successor-feature TD target (td_ridge mode only); mirrors lam_c
+      lam_sr: 0.95
+      # discount factor for the successor-feature TD recursion (td_ridge mode only);
+      # defaults to algo_cfgs.gamma when null
+      gamma_sr: ~
+      # ridge regression L2 regularization coefficient for solving w_r / w_c (td_ridge mode only)
+      ridge_kappa: 0.001
+      # EMA smoothing coefficient for w_r / w_c across iterations, 1.0 = no smoothing (td_ridge mode only)
+      ema_tau: 1.0
   # lagrangian configurations
   lagrange_cfgs:
     # The Kp of PID controller

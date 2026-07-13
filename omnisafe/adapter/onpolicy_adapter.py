@@ -55,6 +55,19 @@ class OnPolicyAdapter(OnlineAdapter):
         super().__init__(env_id, num_envs, seed, cfgs)
         self._reset_log()
 
+    @property
+    def _sr_td_ridge(self) -> bool:
+        """Whether the ``td_ridge`` successor-representation mode is active.
+
+        .. note::
+            Computed on the fly from ``self._cfgs`` (set by :class:`OnlineAdapter`) rather than
+            cached at ``__init__`` time, since some subclasses (e.g. :class:`SimmerAdapter`)
+            deliberately skip :class:`OnPolicyAdapter`'s own ``__init__`` body via
+            ``super(OnPolicyAdapter, self).__init__(...)``.
+        """
+        use_sr = bool(self._cfgs.model_cfgs.get('use_successor_representation', False))
+        return use_sr and self._cfgs.model_cfgs.sr_cfgs.get('sr_mode', 'shared_trunk') == 'td_ridge'
+
     def rollout(  # pylint: disable=too-many-locals
         self,
         steps_per_epoch: int,
@@ -83,6 +96,8 @@ class OnPolicyAdapter(OnlineAdapter):
             description=f'Processing rollout for epoch: {logger.current_epoch}...',
         ):
             act, value_r, value_c, logp = agent.step(obs)
+            if self._sr_td_ridge:
+                phi, psi = agent.sr_features(obs)
             next_obs, reward, cost, terminated, truncated, info = self.step(act)
 
             self._log_value(reward=reward, cost=cost, info=info)
@@ -91,15 +106,18 @@ class OnPolicyAdapter(OnlineAdapter):
                 logger.store({'Value/cost': value_c})
             logger.store({'Value/reward': value_r})
 
-            buffer.store(
-                obs=obs,
-                act=act,
-                reward=reward,
-                cost=cost,
-                value_r=value_r,
-                value_c=value_c,
-                logp=logp,
-            )
+            store_kwargs = {
+                'obs': obs,
+                'act': act,
+                'reward': reward,
+                'cost': cost,
+                'value_r': value_r,
+                'value_c': value_c,
+                'logp': logp,
+            }
+            if self._sr_td_ridge:
+                store_kwargs.update(phi=phi, psi=psi)
+            buffer.store(**store_kwargs)
 
             obs = next_obs
             epoch_end = step >= steps_per_epoch - 1
@@ -115,13 +133,18 @@ class OnPolicyAdapter(OnlineAdapter):
                 if epoch_end or done or time_out:
                     last_value_r = torch.zeros(1)
                     last_value_c = torch.zeros(1)
+                    last_psi = torch.zeros(agent.sr_trunk.sr_dim) if self._sr_td_ridge else None
                     if not done:
                         if epoch_end:
                             _, last_value_r, last_value_c, _ = agent.step(obs[idx])
+                            if self._sr_td_ridge:
+                                _, last_psi = agent.sr_features(obs[idx])
                         if time_out:
                             _, last_value_r, last_value_c, _ = agent.step(
                                 info['final_observation'][idx],
                             )
+                            if self._sr_td_ridge:
+                                _, last_psi = agent.sr_features(info['final_observation'][idx])
                         last_value_r = last_value_r.unsqueeze(0)
                         last_value_c = last_value_c.unsqueeze(0)
 
@@ -133,7 +156,7 @@ class OnPolicyAdapter(OnlineAdapter):
                         self._ep_cost[idx] = 0.0
                         self._ep_len[idx] = 0.0
 
-                    buffer.finish_path(last_value_r, last_value_c, idx)
+                    buffer.finish_path(last_value_r, last_value_c, idx, last_psi=last_psi)
 
     def _log_value(
         self,
