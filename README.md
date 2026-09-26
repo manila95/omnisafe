@@ -1,34 +1,7 @@
 <!-- markdownlint-disable first-line-h1 -->
 <!-- markdownlint-disable html -->
 
-<div align="center">
-  <img src="https://github.com/PKU-Alignment/omnisafe/raw/HEAD/images/logo.png" width="75%"/>
-</div>
-
-<div align="center">
-
-  [![Organization](https://img.shields.io/badge/Organization-PKU--Alignment-blue)](https://github.com/PKU-Alignment)
-  [![PyPI](https://img.shields.io/pypi/v/omnisafe?logo=pypi)](https://pypi.org/project/omnisafe)
-  [![tests](https://img.shields.io/github/actions/workflow/status/PKU-Alignment/omnisafe/test.yml?label=tests&logo=github)](https://github.com/PKU-Alignment/omnisafe/tree/HEAD/tests)
-  [![Documentation Status](https://img.shields.io/readthedocs/omnisafe?logo=readthedocs)](https://omnisafe.readthedocs.io)
-  [![Downloads](https://static.pepy.tech/personalized-badge/omnisafe?period=total&left_color=grey&right_color=blue&left_text=downloads)](https://pepy.tech/project/omnisafe)
-  [![GitHub Repo Stars](https://img.shields.io/github/stars/PKU-Alignment/omnisafe?color=brightgreen&logo=github)](https://github.com/PKU-Alignment/OmniSafe/stargazers)
-  [![codestyle](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-  [![License](https://img.shields.io/github/license/PKU-Alignment/OmniSafe?label=license)](#license)
-  [![CodeCov](https://img.shields.io/codecov/c/github/PKU-Alignment/omnisafe/main?logo=codecov)](https://app.codecov.io/gh/PKU-Alignment/omnisafe)
-  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/PKU-Alignment/omnisafe/)
-
-</div>
-
-<p align="center">
-  <a href="https://omnisafe.readthedocs.io">Documentation</a> |
-  <a href="https://github.com/PKU-Alignment/omnisafe#implemented-algorithms">Implemented Algorithms</a> |
-  <a href="https://github.com/PKU-Alignment/omnisafe#installation">Installation</a> |
-  <a href="https://github.com/PKU-Alignment/omnisafe#getting-started">Getting Started</a> |
-  <a href="https://github.com/PKU-Alignment/omnisafe#license">License</a>
-</p>
-
---------------------------------------------------------------------------------
+# On the Reliability of Value Estimation for Safe Exploration
 
 OmniSafe is an infrastructural framework designed to accelerate safe reinforcement learning (RL) research.
 It provides a comprehensive and reliable benchmark for safe RL algorithms, and also an out-of-box modular toolkit for researchers.
