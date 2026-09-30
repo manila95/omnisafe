@@ -188,11 +188,24 @@ class ObsNormalize(Wrapper):
         env (CMDP): The environment to wrap.
         device (torch.device): The torch device to use.
         norm (Normalizer or None, optional): The normalizer to use. Defaults to None.
+        update_stats (bool, optional): Whether observations seen by this wrapper update the
+            normalizer's running mean/std. Defaults to True, the behavior a live training env
+            needs -- it is what builds those statistics up. Pass False for a dedicated eval-only
+            env whose normalizer was snapshotted from elsewhere: every observation in that pass
+            should see the *same* statistics it was synced with, not ones that drift as the pass
+            progresses.
     """
 
-    def __init__(self, env: CMDP, device: torch.device, norm: Normalizer | None = None) -> None:
+    def __init__(
+        self,
+        env: CMDP,
+        device: torch.device,
+        norm: Normalizer | None = None,
+        update_stats: bool = True,
+    ) -> None:
         """Initialize an instance of :class:`ObsNormalize`."""
         super().__init__(env=env, device=device)
+        self._update_stats = update_stats
         assert isinstance(self.observation_space, spaces.Box), 'Observation space must be Box'
         self._obs_normalizer: Normalizer
 
@@ -235,9 +248,10 @@ class ObsNormalize(Wrapper):
             info['original_final_observation'] = info['final_observation']
             info['final_observation'][final_obs_slice] = self._obs_normalizer.normalize(
                 info['final_observation'][final_obs_slice],
+                update=self._update_stats,
             )
         info['original_obs'] = obs
-        obs = self._obs_normalizer.normalize(obs)
+        obs = self._obs_normalizer.normalize(obs, update=self._update_stats)
         return obs, reward, cost, terminated, truncated, info
 
     def reset(
@@ -257,7 +271,7 @@ class ObsNormalize(Wrapper):
         """
         obs, info = super().reset(seed=seed, options=options)
         info['original_obs'] = obs
-        obs = self._obs_normalizer.normalize(obs)
+        obs = self._obs_normalizer.normalize(obs, update=self._update_stats)
         return obs, info
 
     def save(self) -> dict[str, torch.nn.Module]:

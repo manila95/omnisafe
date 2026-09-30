@@ -85,13 +85,13 @@ class Normalizer(nn.Module):
         """
         return self.normalize(data)
 
-    def normalize(self, data: torch.Tensor) -> torch.Tensor:
+    def normalize(self, data: torch.Tensor, update: bool = True) -> torch.Tensor:
         """Normalize the data.
 
         .. hint::
             - If the data is the first data, the data will be used to initialize the mean and std.
             - If the data is not the first data, the data will be normalized by the mean and std.
-            - Update the mean and std by the data.
+            - Update the mean and std by the data, unless ``update=False``.
 
         Args:
             data (torch.Tensor): The raw data to be normalized.
@@ -100,7 +100,8 @@ class Normalizer(nn.Module):
             The normalized data.
         """
         data = data.to(self._mean.device)
-        self._push(data)
+        if update:
+            self._push(data)
         if self._count <= 1:
             return data
         output = (data - self._mean) / self._std
