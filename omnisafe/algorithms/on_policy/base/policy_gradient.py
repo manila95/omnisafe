@@ -298,30 +298,12 @@ class PolicyGradient(BaseAlgo):
             self._logger.register_key('Value/Train/Correlation_true_r')
 
     def _get_mc_value_study_env(self):
-        """Lazily build the dedicated eval env for ``algo_cfgs.mc_value_study``.
+        """Dedicated env for the s0 study, built once and cached.
 
-        Mirrors :meth:`~omnisafe.adapter.online_adapter.OnlineAdapter._wrapper`/``_wrapper_eval``'s
-        wrapper recipe (``TimeLimit`` / ``AutoReset`` / ``ObsNormalize`` / ``ActionScale`` /
-        ``Unsqueeze``) so the same-layout MC rollouts see identical action/observation processing
-        to training, but builds an entirely separate env instance rather than reusing
-        ``self._env``'s eval env (:attr:`OnlineAdapter._eval_env`, only constructed when the
-        environment sets ``need_evaluation``, and whose own ``ObsNormalize`` -- unlike this one --
-        is never synced to the training env's live statistics). Built once and cached; the
-        observation normalizer is re-synced from the live training env on every
-        :meth:`estimate_true_value_same_state_mc` call, not just here at construction.
-
-        Controlled by ``algo_cfgs.mc_value_study_vector_envs`` (default 1): the same-layout
-        requirement only constrains *one env instance* per probe -- each of the N parallel envs
-        below still gets its own clean ``reset(seed=X)``, so N independent probes run
-        concurrently (subprocess-parallel, since ``safety_gymnasium.vector.make`` defaults to
-        ``asynchronous=True``) instead of ``estimate_true_value_same_state_mc`` running all
-        ``len(probe_seeds) * mc_repeats`` episodes one at a time on a single env. This was the
-        dominant cost of the whole training loop (~80% of wall-clock in the value-function
-        estimation study): with 100 probes x 5 repeats x up to 1000 steps each, one eval epoch
-        was ~500k sequential env steps on a single core. N>1 turns that into
-        ``ceil(500 / N)`` waves of N-way-parallel rollouts -- close to an N-x speedup, bounded by
-        how many cores are actually free (accounting for however many other training runs/vector
-        workers are sharing the machine).
+        Same wrapper recipe as training, but ``ObsNormalize(update_stats=False)``: the
+        statistics are re-synced from the live training env before every call and must not
+        drift as the probes run. Parallelism is its own knob, independent of
+        ``train_cfgs.vector_env_nums``.
         """
         if self._mc_eval_env is not None:
             return self._mc_eval_env
@@ -335,34 +317,22 @@ class PolicyGradient(BaseAlgo):
         if eval_env.need_auto_reset_wrapper:
             eval_env = AutoReset(eval_env, device=self._device)
         if self._cfgs.algo_cfgs.obs_normalize:
-            # update_stats=False: this env's normalizer is a snapshot (see sync_normalizer_from
-            # in estimate_true_value_same_state_mc), re-synced fresh from the live training env
-            # before every eval call -- every probe within that call must see those exact,
-            # unchanging statistics, not ones that keep drifting with each rollout processed.
             eval_env = ObsNormalize(eval_env, device=self._device, update_stats=False)
         eval_env = ActionScale(eval_env, low=-1.0, high=1.0, device=self._device)
         if n_envs == 1:
             eval_env = Unsqueeze(eval_env, device=self._device)
         self._mc_eval_env = eval_env
-        # A vectorized (n_envs > 1) safety_gymnasium env has no .spec (it's an AsyncVectorEnv),
-        # so max_episode_steps can't be read off it directly -- grab it once from a disposable
-        # single-env instance instead. Cheap (env construction only, no stepping) and done once.
         probe_env = make_env(self._env_id, num_envs=1, device=self._device, **env_cfgs)
         self._mc_eval_max_episode_steps = probe_env.max_episode_steps
         probe_env.close()
         return self._mc_eval_env
 
     def _get_intermediate_state_env(self):
-        """Lazily build the dedicated env for ``algo_cfgs.intermediate_state_study``.
+        """Dedicated env for the intermediate-state study, built once and cached.
 
-        ``num_envs = algo_cfgs.intermediate_state_study_probes`` (one env slot per probe state, at
-        each within-episode position -- unlike the s0 study's env, this one isn't used in waves of
-        resets: one on-policy collection rollout produces exactly this many probes per position in
-        a single pass, via :func:`omnisafe.utils.state_snapshot.collect_on_policy_snapshots`).
-
-        Calls :func:`omnisafe.utils.state_snapshot.enable_state_snapshots` before constructing the
-        env -- required so the vectorized env's subprocess workers (forked during construction)
-        inherit the ``Builder.step`` patch that makes snapshotting possible at all.
+        ``num_envs = intermediate_state_study_probes``: one collection rollout yields that
+        many probes per position in a single pass. ``enable_state_snapshots()`` must run
+        before construction so the vectorized env's forked workers inherit the patch.
         """
         if self._mc_intermediate_env is not None:
             return self._mc_intermediate_env
@@ -377,10 +347,6 @@ class PolicyGradient(BaseAlgo):
         if env.need_auto_reset_wrapper:
             env = AutoReset(env, device=self._device)
         if self._cfgs.algo_cfgs.obs_normalize:
-            # update_stats=False: same rationale as _get_mc_value_study_env -- this env's
-            # normalizer is synced from the live training env once per collection call (see
-            # learn()), and must stay fixed (not drift across the collection rollout's hundreds
-            # of steps, nor across the scoring waves that follow) for probes to be comparable.
             env = ObsNormalize(env, device=self._device, update_stats=False)
         env = ActionScale(env, low=-1.0, high=1.0, device=self._device)
         if n_envs == 1:
@@ -392,66 +358,34 @@ class PolicyGradient(BaseAlgo):
         return self._mc_intermediate_env
 
     def _is_value_eval_epoch(self, epoch: int) -> bool:
-        """Whether ``epoch`` is due for the (expensive) value-evaluation pass.
+        """Whether ``epoch`` is due for the value studies.
 
-        ``early_eval_freq`` sets the cadence for the first ``early_eval_epochs`` epochs and
-        ``value_eval_freq`` after, so the grid is the plain multiples of that frequency --
-        5, 10, 15, ... for the default ``early_eval_freq: 5`` -- with one change: the run's
-        first evaluation happens at
-        epoch **1**, not epoch 0. At epoch 0 the rollout the study measures was produced by the
-        freshly initialised policy and critics, so the probe spends a full
-        full probe rollout to measure noise; epoch 1 is the first point where there
-        is a trained update to look at. Every diagnostic series (value studies, SR diagnostics,
-        critic scatter plots) shares this one schedule, so they can be read side by side.
+        ``early_eval_freq`` below ``early_eval_epochs``, ``value_eval_freq`` at or above it.
+        The first evaluation is epoch 1, not 0: at epoch 0 the rollout comes from the
+        freshly initialised policy and critics, so there is no trained update to look at.
         """
         eval_freq = getattr(self._cfgs.algo_cfgs, 'value_eval_freq', 50)
         early_eval_freq = getattr(self._cfgs.algo_cfgs, 'early_eval_freq', 5)
-        # Width of the dense-cadence window, previously the bare literal 100. It is a real knob:
-        # an eval epoch costs ~240 s against a ~9 s training epoch (measured), so where this
-        # boundary sits is one of the few levers on total eval cost that does not weaken any
-        # individual measurement -- it only moves where the budget is spent. Defaulted to 100
-        # via getattr so a config predating the key keeps exactly its old schedule.
         early_eval_epochs = int(getattr(self._cfgs.algo_cfgs, 'early_eval_epochs', 100))
         effective_eval_freq = early_eval_freq if epoch < early_eval_epochs else eval_freq
         return epoch == 1 or (epoch > 0 and epoch % effective_eval_freq == 0)
 
     def _run_eval_studies(self, epoch: int) -> None:
-        """Run this epoch's value-function evaluation studies, if any are due.
+        """Run this epoch's value studies, if due, and persist the results.
 
-        Extracted out of :meth:`learn` so algorithms with their own ``learn()`` loop (MICE, in
-        particular -- it overrides :meth:`learn` outright to drive its own rollout/adapter) can
-        opt into the exact same eval/study/logging machinery by calling this one method at the
-        equivalent point in their own loop (after that epoch's rollout, before ``_update()``),
-        rather than duplicating ~180 lines of eval logic or silently going without it. Covers,
-        in order: :func:`~omnisafe.utils.value_eval.estimate_true_value` (``test_estimate``),
-        the same-layout MC value study (``mc_value_study``), the on-policy intermediate-state
-        study (``intermediate_state_study``) plus its pooled correlation and gradient-alignment
-        diagnostics, and finally persisting this epoch's raw eval data / scatter grid / model
-        checkpoint. All gates are read from ``algo_cfgs`` via ``getattr(..., default)``, so an
-        algorithm/config that doesn't set them simply skips that block, same as before.
+        Called from ``learn()`` after the rollout and before ``_update()``, so the critic
+        evaluated is the one that produced this epoch's advantages rather than one already
+        fitted to them. Both studies feed one pooled ``ValueEval/`` block; the per-study
+        breakdown and every raw array go to ``eval_data/``.
         """
         is_eval_epoch = self._is_value_eval_epoch(epoch)
         if is_eval_epoch:
-            # Hooked here rather than in _update because natural_pg (and ~9 other algorithms)
-            # override _update, so it is not a seam every algorithm passes through; this method
-            # is. The extra _buf.get() is only paid on eval epochs, and is safe to repeat: it
-            # rebuilds its dict from the underlying arrays and rebinds rather than writes when
-            # standardizing advantages, so the copy _update takes next is unaffected.
             self._log_train_critic_diagnostics(self._buf.get(), epoch)
-        # Collected across whichever of the eval blocks below actually run this epoch, then
-        # persisted as one pickle (raw per-probe arrays + aggregate stats -- the online
-        # loggers, progress.csv/wandb/tensorboard, only ever see the aggregates) plus a
-        # scatter-plot quick-look and a model checkpoint, all on this same eval cadence -- see
-        # the save block after these three studies.
         eval_data_bundle: dict | None = {'epoch': epoch} if is_eval_epoch else None
-        # Same-layout Monte-Carlo value study (opt-in, default off -- see
-        # estimate_true_value_same_state_mc's docstring). Shares effective_eval_freq with the
-        # estimate_true_value call above so both diagnostics are read from the same epochs.
         if getattr(self._cfgs.algo_cfgs, 'eval_critic', False) and is_eval_epoch:
             if self._mc_probe_seeds is None:
                 n_probes = int(getattr(self._cfgs.algo_cfgs, 'mc_value_study_probes', 100))
                 seed_offset = int(getattr(self._cfgs.algo_cfgs, 'mc_value_study_seed_offset', 100_000))
-                # Fixed for the whole run, so every eval epoch probes the same states.
                 self._mc_probe_seeds = list(range(seed_offset, seed_offset + n_probes))
             mc_env = self._get_mc_value_study_env()  # also sets _mc_eval_max_episode_steps
             mc_stats, mc_raw = estimate_true_value_same_state_mc(
@@ -469,18 +403,7 @@ class PolicyGradient(BaseAlgo):
                 bootstrap_threshold=getattr(self._cfgs.algo_cfgs, 'mc_eval_bootstrap_threshold', None),
                 tail_mode=getattr(self._cfgs.algo_cfgs, 'mc_eval_tail', None),
             )
-            # Not logged on its own: the s0 probes feed the pooled set below, which is the
-            # number we actually read. The per-study breakdown stays in the eval_data bundle
-            # for offline use.
             eval_data_bundle['mc_study'] = {'stats': mc_stats, 'raw': mc_raw}
-        # On-policy intermediate-state value study (opt-in, default off -- see
-        # estimate_value_from_snapshots's docstring). Asks the question the s0 study above
-        # can't: is the critic accurate at states the CURRENT policy actually visits
-        # mid-episode, not just at episode starts. A fresh batch of on-policy states is
-        # collected every eval epoch (not a fixed pool re-probed like the s0 study's
-        # _mc_probe_seeds) -- by epoch 400 the policy visits very different states than at
-        # epoch 20, so re-using an old batch would be scoring accuracy on states the current
-        # policy may never actually visit.
         if getattr(self._cfgs.algo_cfgs, 'eval_critic', False) and is_eval_epoch:
             positions = list(
                 getattr(
@@ -509,11 +432,6 @@ class PolicyGradient(BaseAlgo):
                         self._cfgs.algo_cfgs, 'cost_gamma', self._cfgs.algo_cfgs.gamma,
                     ),
                     snapshots=collected[pos],
-                    # Full fresh-start budget, same as s0 -- not max_eps - pos (the
-                    # physically-remaining steps of the one episode instance this snapshot was
-                    # captured from). See estimate_value_from_snapshots's docstring for why:
-                    # the study wants "value of this state as a start state", not "value given
-                    # the wall-clock left in the episode it happened to be captured from".
                     horizon=max_eps,
                     mc_repeats=repeats,
                     epoch=epoch,
@@ -521,15 +439,9 @@ class PolicyGradient(BaseAlgo):
                     bootstrap_threshold=getattr(self._cfgs.algo_cfgs, 'mc_eval_bootstrap_threshold', None),
                     tail_mode=getattr(self._cfgs.algo_cfgs, 'mc_eval_tail', None),
                 )
-                # Likewise not logged per position -- pooled below; raw kept in the bundle.
                 eval_data_bundle['intermediate_study'][pos] = {
                     'stats': pos_stats, 'raw': pos_raw,
                 }
-            # Pooled diversity correlation over every state actually evaluated on this
-            # epoch -- s0 (if mc_value_study also ran) plus every intermediate position,
-            # pooled into one set before computing a single correlation. See
-            # value_eval.pool_correlation_stats's docstring for why this is not the same
-            # as averaging the per-category correlations above.
             pooled_sources = []
             if 'mc_study' in eval_data_bundle:
                 pooled_sources.append(eval_data_bundle['mc_study']['raw'])
@@ -540,28 +452,8 @@ class PolicyGradient(BaseAlgo):
                 pooled_sources, prefix='ValueEval/',
             )
             self._logger.store(pooled_stats)
-            # Gradient-alignment diagnostic (see compute_gradient_alignment's docstring) --
-            # uses the exact same pooled (s, a, return, pred, mc_mean) samples the
-            # correlation numbers above were just computed from, so it answers a directly
-            # comparable question at zero extra rollout cost: not just "does the critic's
-            # prediction correlate with the truth" but "does the critic's error actually
-            # distort the direction of the resulting policy gradient".
-            # Gradient alignment is deliberately NOT computed here: it runs autograd through
-            # the actor once per stream, which is real cost for a number that the pooled raw
-            # arrays below (plus a checkpoint) let you recompute offline via
-            # value_eval.compute_gradient_alignment.
             eval_data_bundle['pooled'] = {'stats': pooled_stats, 'raw': pooled_raw}
-        # Persist this epoch's eval data (raw + aggregates -- see eval_data_dump.py's
-        # docstring for why this needs to exist separately from the online loggers) and save
-        # a checkpoint, both on the exact same cadence as the eval blocks above. Note this
-        # runs before this epoch's own dump_tabular() (in learn()), so self._logger's own epoch
-        # counter still equals `epoch` here -- torch_save() names the file accordingly,
-        # consistent with eval_data_bundle's filename.
         if is_eval_epoch:
-            # Only when a study actually ran: with eval_critic off the bundle holds nothing but
-            # {'epoch': N}, and writing that (plus pushing it as a wandb artifact) every eval
-            # epoch is pure noise. The checkpoint below is saved regardless -- that is what keeps
-            # the run evaluable after the fact, which turning evaluation off should not forfeit.
             if len(eval_data_bundle) > 1:
                 eval_data_path = save_eval_data(self._logger.log_dir, epoch, eval_data_bundle)
                 log_eval_data_to_wandb(eval_data_path, epoch)
@@ -661,25 +553,14 @@ class PolicyGradient(BaseAlgo):
 
     @torch.no_grad()
     def _log_train_critic_diagnostics(self, data: dict, epoch: int) -> None:
-        """Estimation error and correlation for the critic on the *training* batch.
+        """Estimation error and correlation for the critic on the training batch.
 
-        The MC studies ask whether V tracks the true return on probe states. This asks the
-        cheaper, complementary question on the states the critic was actually fitted to: does it
-        predict its own regression target, and the realised discounted return, on this epoch's
-        rollout? No extra environment steps -- one forward pass over a batch already in memory.
-
-        Called at the top of :meth:`_update`, so the critic queried is the pre-update one: the
-        same critic the MC studies scored this epoch, and the one that produced the advantages
-        this update is about to consume.
-
-        Only the error and the correlation are logged. The raw per-state arrays go to
-        ``train_data/epoch_XXXXX.pkl`` alongside the eval bundle, so anything else (residual
-        distributions, per-quantile breakdowns, explained variance) can be recomputed offline
-        without re-running training.
+        One forward pass over data already in memory, so no extra environment steps. Raw
+        per-state arrays go to ``train_data/``.
 
         Args:
-            data (dict): The epoch batch from :meth:`~omnisafe.common.buffer.VectorOnPolicyBuffer.get`.
-            epoch (int): Current epoch, for the dump filename.
+            data: The epoch batch from the buffer.
+            epoch: For the dump filename.
         """
         if not getattr(self._cfgs.algo_cfgs, 'eval_critic', False):
             return
@@ -706,9 +587,6 @@ class PolicyGradient(BaseAlgo):
                 'pred': pred.detach().cpu().numpy(),
                 'target': target.detach().cpu().numpy(),
             }
-        # The realised discounted reward return for this batch -- the on-policy counterpart of
-        # the MC studies' `mc_mean`, and what makes the dump self-sufficient for recomputing
-        # prediction-vs-truth offline rather than only prediction-vs-target.
         if 'discounted_ret' in data:
             ret = data['discounted_ret'].flatten()
             stats['Value/Train/EstimationError_true_r'] = (ret - streams['r'][0]).mean().item()

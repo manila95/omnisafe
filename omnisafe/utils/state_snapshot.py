@@ -129,19 +129,6 @@ _PATCHED = False
 
 def enable_state_snapshots() -> None:
     """Monkeypatch ``Builder`` to support conditional state snapshotting.
-
-    Adds two things to the class: a ``step`` override that stashes a snapshot into
-    ``info['state_snapshot']`` when ``self.steps`` hits one of ``self.snapshot_trigger_steps``,
-    and a ``set_snapshot_trigger_steps`` method (see :func:`configure_snapshot_triggers` for why
-    a method, not a bare attribute set via ``VectorEnv.set_attr``, is needed to configure this
-    across a vectorized env).
-
-    Idempotent (safe to call more than once). Must be called before constructing any vectorized
-    env whose workers you want snapshot-capable -- the patch has to already be in place at fork
-    time to be inherited by each worker process. A plain call with no other setup is a no-op at
-    runtime (``snapshot_trigger_steps`` defaults to unset on every ``Builder``), so it's safe to
-    call unconditionally/early (e.g. once per training process) rather than threading a flag
-    through every call site that constructs an env.
     """
     global _PATCHED  # noqa: PLW0603
     if _PATCHED:
@@ -163,24 +150,12 @@ def enable_state_snapshots() -> None:
     def restore_and_get_obs(self, snapshot: dict, reset_elapsed_steps: bool = False):
         restore_builder(self, snapshot)
         if reset_elapsed_steps:
-            # Treat the restored physical state as a fresh start state (like a real
-            # env.reset()), not as "continuing episode N at step T" -- see
-            # estimate_value_from_snapshots's docstring for why this is the semantics an
-            # intermediate-state value study actually wants: a diverse *state*, evaluated with
-            # the same full max_episode_steps budget s0 gets, not truncated to however many
-            # steps happened to be physically left in the one episode instance it was captured
-            # from. Only the RL-episode bookkeeping resets here -- data.time (mujoco's own
-            # physics clock) is left exactly as captured, since that's a simulation-continuity
-            # concern, not an RL-horizon one.
             self.steps = 0
             self.terminated = False
             self.truncated = False
         return self.task.obs()
 
     def restore_and_get_obs_through_time_limit(self, snapshot: dict, reset_elapsed_steps: bool = False):
-        # self is the SafeTimeLimit wrapper, not the Builder -- see the module docstring's note
-        # on why its own _elapsed_steps counter needs resetting too, separately from the inner
-        # Builder's own .steps. See restore_and_get_obs above for why reset_elapsed_steps exists.
         self._elapsed_steps = 0 if reset_elapsed_steps else snapshot['steps']
         return self.env.restore_and_get_obs(snapshot, reset_elapsed_steps=reset_elapsed_steps)
 
@@ -196,17 +171,14 @@ def configure_snapshot_triggers(env, trigger_steps: set[int] | None) -> None:
 
     Args:
         env: A single (``num_envs == 1``) or vectorized env. Requires
-            :func:`enable_state_snapshots` to have already been called (before the vectorized
-            case's workers were forked).
+        :func:`enable_state_snapshots` to have already been called (before the vectorized
+        case's workers were forked).
         trigger_steps: The set of ``builder.steps`` values (i.e. steps *elapsed this episode*,
-            1-indexed since ``Builder.step`` increments ``self.steps`` before returning) at which
-            to snapshot. ``None`` or empty disables snapshotting.
+        1-indexed since ``Builder.step`` increments ``self.steps`` before returning) at which
+        to snapshot. ``None`` or empty disables snapshotting.
     """
     target = _find_safety_gymnasium_target(env)
     if hasattr(target, 'call'):
-        # NOT set_attr: that would set the attribute on each worker's SafeTimeLimit wrapper, not
-        # the inner Builder -- see the module docstring's "Reaching into a vectorized env"
-        # section for why this has to be an RPC'd method call instead.
         target.call('set_snapshot_trigger_steps', trigger_steps)
     else:
         target.set_snapshot_trigger_steps(trigger_steps)
@@ -226,13 +198,6 @@ def snapshot_builder(builder: Builder) -> dict:
         'qvel': data.qvel.copy(),
         'time': float(data.time),
         'act': data.act.copy() if model.na > 0 else None,
-        # data.ctrl: the last-applied actuator control signal. Not part of qpos/qvel, but
-        # mj_forward uses it to compute the *current* acceleration (qacc) and everything
-        # downstream of that -- including the accelerometer sensor -- as a "what if this force
-        # were applied right now" query. Restoring qpos/qvel/body_pos alone leaves it at
-        # whatever the *target* env's own prior rollout last set it to; found by a real
-        # restored-observation mismatch (accelerometer reading off by ~2-22, everything else
-        # bit-exact) that traced to exactly this.
         'ctrl': data.ctrl.copy(),
         'body_pos': model.body_pos.copy(),
         'body_quat': model.body_quat.copy(),
@@ -246,14 +211,6 @@ def snapshot_builder(builder: Builder) -> dict:
 
 def restore_builder(builder: Builder, snapshot: dict) -> None:
     """Restore ``builder`` (in place) to a previously captured snapshot.
-
-    Writes the snapshot's fields onto ``builder.task``'s *existing* ``data``/``model`` objects
-    (rather than replacing them wholesale) and calls ``mujoco.mj_forward`` to recompute every
-    derived quantity (``xpos``, sensor readings, contacts) consistent with the restored state --
-    mirroring exactly what Safety-Gymnasium's own ``build_goal_position`` does after mutating
-    ``body_pos``. Safe to call repeatedly on the same snapshot dict (e.g. ``mc_repeats``
-    independent rollouts from the same captured state): every field written here is copied by
-    value (``[:] =`` or a plain scalar assignment), never a shared reference.
     """
     import mujoco  # noqa: PLC0415
 
@@ -302,33 +259,17 @@ def restore_and_get_obs(
     reset_elapsed_steps: bool = False,
 ) -> torch.Tensor:
     """Restore a (possibly vectorized) env to ``snapshots`` (one entry per env slot -- each slot
-    gets its *own*, independent snapshot, unlike :func:`configure_snapshot_triggers` which
-    broadcasts the same value everywhere) and return the resulting observation, processed exactly
-    as a real ``env.reset()`` would have: normalized (frozen -- ``update=False``, consistent with
-    how the MC-study env's own ``ObsNormalize`` is configured, see
-    ``policy_gradient.py:_get_mc_value_study_env``) and device/dtype-converted. This is the
-    "restore" analogue of ``env.reset(seed=X)`` in
-    ``omnisafe.utils.value_eval.estimate_true_value_same_state_mc``.
-
-    Broadcasting a *different* value per worker isn't expressible with ``VectorEnv``'s own
-    ``call()`` (same args to every worker) or ``set_attr()`` (lands on each worker's outer
-    wrapper, not the inner ``Builder`` -- see the module docstring), so for the ``AsyncVectorEnv``
-    case this talks to each worker's pipe directly, replicating ``call_async``/``call_wait``'s own
-    protocol (including its ``_state`` bookkeeping, so subsequent ``step()``/``reset()`` calls on
-    the vector env keep working normally) but with per-pipe arguments.
 
     Args:
         reset_elapsed_steps: If True, the restored state's RL-episode bookkeeping (the ``Builder``
-            step counter and the ``SafeTimeLimit`` wrapper's own ``_elapsed_steps``) is reset to 0
-            instead of restored to its captured value -- i.e. the physical state is treated as a
-            fresh start state with a full ``max_episode_steps`` budget ahead of it, not one bound
-            by however many steps happened to be physically left in the episode it was captured
-            from. See :func:`omnisafe.utils.value_eval.estimate_value_from_snapshots`'s docstring
-            for why this is what an intermediate-state value study wants. Defaults to False
-            (restore exactly as captured) for any other caller of this function.
+        step counter and the ``SafeTimeLimit`` wrapper's own ``_elapsed_steps``) is reset to 0
+        instead of restored to its captured value -- i.e. the physical state is treated as a
+        fresh start state with a full ``max_episode_steps`` budget ahead of it, not one bound
+        by however many steps happened to be physically left in the episode it was captured
+        from. See :func:`omnisafe.utils.value_eval.estimate_value_from_snapshots`'s docstring
+        for why this is what an intermediate-state value study wants. Defaults to False
+        (restore exactly as captured) for any other caller of this function.
     """
-    # Local import: avoid import-time coupling between these two modules (value_eval.py doesn't
-    # otherwise need to know state_snapshot.py exists, and vice versa).
 
     target = _find_safety_gymnasium_target(env)
 
@@ -371,35 +312,19 @@ def collect_on_policy_snapshots(
     base_seed: int = 0,
 ) -> dict[int, list[dict]]:
     """Roll out ``env`` (vectorized, ``num_envs = N``) with the current stochastic policy,
-    capturing a snapshot from every env slot at every step index in ``trigger_steps``.
-
-    These are genuine on-policy states: each of the N parallel episodes is driven by
-    ``agent.step``'s own stochastic action sampling, the same as a real training rollout would
-    be -- this is just a separate, dedicated rollout for state-collection purposes (see
-    ``policy_gradient.py``'s dedicated-eval-env pattern for the same rationale applied to the s0
-    MC study), not a hook into the live training rollout itself.
-
-    Requires all N env slots to stay in lockstep (same ``builder.steps`` at every iteration) for
-    the whole collection window, i.e. no early termination before ``max(trigger_steps)`` -- true
-    for Safety-Gymnasium's Goal/Push/etc. tasks (verified empirically: ``Metrics/EpLen`` is always
-    exactly ``max_episode_steps``), same assumption
-    :func:`omnisafe.utils.value_eval.estimate_true_value_same_state_mc` and
-    :func:`omnisafe.utils.value_eval.estimate_value_from_snapshots` make about episode homogeneity.
-    Call :func:`enable_state_snapshots` before constructing ``env`` (fork-inherited by its
-    workers); this function calls :func:`configure_snapshot_triggers` itself.
 
     Args:
         agent: The actor-critic; must expose ``step(obs) -> (action, value_r, value_c, log_prob)``.
         env: A vectorized (``num_envs = N``) env to collect from. Its ``ObsNormalize`` should
-            already be synced from the live training env (same rationale as
-            ``estimate_true_value_same_state_mc``'s ``sync_normalizer_from``) *before* calling
-            this, so the on-policy actions sampled here are representative of real training
-            behavior -- there's no sync parameter here since that only needs doing once, not per
-            collection call, and the caller already owns that env's lifecycle.
+        already be synced from the live training env (same rationale as
+        ``estimate_true_value_same_state_mc``'s ``sync_normalizer_from``) *before* calling
+        this, so the on-policy actions sampled here are representative of real training
+        behavior -- there's no sync parameter here since that only needs doing once, not per
+        collection call, and the caller already owns that env's lifecycle.
         trigger_steps: The within-episode step indices to snapshot at.
         base_seed: First of N consecutive seeds used to reset the N parallel episodes
-            (``base_seed .. base_seed + N - 1``). Vary this per call (e.g. by epoch) for a fresh
-            batch of on-policy states each time.
+        (``base_seed .. base_seed + N - 1``). Vary this per call (e.g. by epoch) for a fresh
+        batch of on-policy states each time.
 
     Returns:
         Dict mapping each step index in ``trigger_steps`` to a list of N snapshots (one per env
@@ -416,9 +341,6 @@ def collect_on_policy_snapshots(
         act, _, _, _ = agent.step(obs)
         obs, _, _, _, _, info = env.step(act)
         if 'state_snapshot' in info:
-            # builder.steps == t + 1 for every slot here (lockstep assumption, see docstring) --
-            # trust that rather than anything in `info`, which doesn't itself say which trigger
-            # step fired.
             step_idx = t + 1
             if step_idx in collected:
                 mask = info['_state_snapshot']
