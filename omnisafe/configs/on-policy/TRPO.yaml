@@ -35,9 +35,10 @@ defaults:
     # the on-policy intermediate-state study. The critic's training loss says how well it fits
     # its own target; these say whether that target tracks the true discounted return.
     #
-    # Off by default: an eval epoch costs roughly an order of magnitude more than a training
-    # epoch (probes x repeats full episodes), so this is opt-in.
-    eval_critic: False
+    # On by default. An eval epoch costs roughly an order of magnitude more than a training
+    # epoch (probes x repeats full episodes), so turn this off for speed-focused runs -- but
+    # note that doing so also changes the RNG stream, and therefore the training trajectory.
+    eval_critic: True
     # Cadence. early_eval_freq applies below early_eval_epochs, value_eval_freq at or above it;
     # the run's first evaluation is always epoch 1 (at epoch 0 the rollout comes from the
     # freshly initialised policy and critics, so there is no trained update to look at).

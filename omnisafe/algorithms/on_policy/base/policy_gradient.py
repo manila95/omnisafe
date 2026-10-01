@@ -22,7 +22,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from rich.progress import track
+from rich.progress import Progress, track
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -410,7 +410,28 @@ class PolicyGradient(BaseAlgo):
         if is_eval_epoch:
             self._log_train_critic_diagnostics(self._buf.get(), epoch)
         eval_data_bundle: dict | None = {'epoch': epoch} if is_eval_epoch else None
-        if getattr(self._cfgs.algo_cfgs, 'eval_critic', False) and is_eval_epoch:
+        run_studies = getattr(self._cfgs.algo_cfgs, 'eval_critic', False) and is_eval_epoch
+        progress = task_id = None
+        if run_studies:
+            # Both studies share one bar: six _roll_probes calls (s0 plus one per intermediate
+            # position) would otherwise each draw their own. Counted in rollouts, which is what
+            # the wait is actually made of.
+            total = int(getattr(self._cfgs.algo_cfgs, 'mc_value_study_probes', 100)) * int(
+                getattr(self._cfgs.algo_cfgs, 'mc_value_study_repeats', 5),
+            ) + len(
+                list(getattr(self._cfgs.algo_cfgs, 'intermediate_state_study_positions', [])),
+            ) * int(getattr(self._cfgs.algo_cfgs, 'intermediate_state_study_probes', 20)) * int(
+                getattr(self._cfgs.algo_cfgs, 'intermediate_state_study_repeats', 5),
+            )
+            progress = Progress()
+            progress.start()
+            task_id = progress.add_task(f'Evaluating value function (epoch {epoch})...', total=total)
+
+        def _tick(n: int) -> None:
+            if progress is not None:
+                progress.advance(task_id, n)
+
+        if run_studies:
             if self._mc_probe_seeds is None:
                 n_probes = int(getattr(self._cfgs.algo_cfgs, 'mc_value_study_probes', 100))
                 seed_offset = int(getattr(self._cfgs.algo_cfgs, 'mc_value_study_seed_offset', 100_000))
@@ -430,9 +451,10 @@ class PolicyGradient(BaseAlgo):
                 return_raw=True,
                 bootstrap_threshold=getattr(self._cfgs.algo_cfgs, 'mc_eval_bootstrap_threshold', None),
                 tail_mode=getattr(self._cfgs.algo_cfgs, 'mc_eval_tail', None),
+                tick=_tick,
             )
             eval_data_bundle['mc_study'] = {'stats': mc_stats, 'raw': mc_raw}
-        if getattr(self._cfgs.algo_cfgs, 'eval_critic', False) and is_eval_epoch:
+        if run_studies:
             positions = list(
                 getattr(
                     self._cfgs.algo_cfgs,
@@ -466,6 +488,7 @@ class PolicyGradient(BaseAlgo):
                     return_raw=True,
                     bootstrap_threshold=getattr(self._cfgs.algo_cfgs, 'mc_eval_bootstrap_threshold', None),
                     tail_mode=getattr(self._cfgs.algo_cfgs, 'mc_eval_tail', None),
+                    tick=_tick,
                 )
                 eval_data_bundle['intermediate_study'][pos] = {
                     'stats': pos_stats, 'raw': pos_raw,
@@ -481,6 +504,8 @@ class PolicyGradient(BaseAlgo):
             )
             self._logger.store(pooled_stats)
             eval_data_bundle['pooled'] = {'stats': pooled_stats, 'raw': pooled_raw}
+        if progress is not None:
+            progress.stop()
         if is_eval_epoch:
             if len(eval_data_bundle) > 1:
                 eval_data_path = save_eval_data(self._logger.log_dir, epoch, eval_data_bundle)

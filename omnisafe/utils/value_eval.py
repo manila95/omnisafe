@@ -81,6 +81,7 @@ def _roll_probes(
     bootstrap_tail: bool,
     estimators: tuple,
     who: str,
+    tick: Callable[[int], None] | None = None,
 ) -> dict:
     """Roll every task out in waves of ``env.num_envs`` and accumulate per-task results.
 
@@ -102,6 +103,7 @@ def _roll_probes(
         bootstrap_tail: Add the critic's value at the truncation point to the return.
         estimators: From :func:`_estimator_cfg`.
         who: Caller name, for error messages.
+        tick: Called with each wave's size, so one caller-owned bar can span every study.
 
     Returns:
         Per-task lists keyed ``pred_r``/``pred_c``/``obs``/``act``/``ret_r``/``ret_c``/
@@ -200,6 +202,9 @@ def _roll_probes(
                 torch.from_numpy(v_c_seq[:, local]).float(),
                 term, lam_c, discount_c, adv_c, logp_seq=logp_this,
             )
+        if tick is not None:
+            tick(len(idxs))
+
     return out
 
 
@@ -274,6 +279,7 @@ def estimate_true_value_same_state_mc(
     return_raw=False,
     bootstrap_threshold=None,
     tail_mode=None,
+    tick=None,
 ):
     """Score V(s0) against a same-layout Monte-Carlo estimate.
 
@@ -322,7 +328,7 @@ def estimate_true_value_same_state_mc(
         horizon=horizon, full_horizon=max_episode_steps,
         discount_r=discount_r, discount_c=discount_c,
         bootstrap_tail=bootstrap_tail, estimators=_estimator_cfg(cfgs),
-        who='estimate_true_value_same_state_mc',
+        who='estimate_true_value_same_state_mc', tick=tick,
     )
     result = _probe_stats(per_task, len(probe_seeds), mc_repeats, return_raw)
     if return_raw:
@@ -343,6 +349,7 @@ def estimate_value_from_snapshots(
     return_raw=False,
     bootstrap_threshold=None,
     tail_mode=None,
+    tick=None,
 ):
     """Score V(s) at on-policy mid-episode states, restored from simulator snapshots.
 
@@ -389,6 +396,6 @@ def estimate_value_from_snapshots(
         horizon=horizon, full_horizon=nominal_horizon,
         discount_r=discount_r, discount_c=discount_c,
         bootstrap_tail=bootstrap_tail, estimators=_estimator_cfg(cfgs),
-        who='estimate_value_from_snapshots',
+        who='estimate_value_from_snapshots', tick=tick,
     )
     return _probe_stats(per_task, len(snapshots), mc_repeats, return_raw)
