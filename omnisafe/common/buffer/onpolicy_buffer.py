@@ -180,8 +180,14 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
         costs = torch.cat([self.data['cost'][path_slice], last_value_c])
         values_c = torch.cat([self.data['value_c'][path_slice], last_value_c])
 
-        discountred_ret = discount_cumsum(rewards, self._gamma)[:-1]
-        self.data['discounted_ret'][path_slice] = discountred_ret
+        # Simulated reward only -- no bootstrap. Appending ``last_value_r`` as a pseudo-final
+        # reward (as the advantage/target estimators legitimately do) would bake the critic's
+        # own prediction into the very quantity the critic is scored against in
+        # ``Value/Train/*_true_r``. Same reasoning as ``mc_eval_tail: 'drop'`` in the MC studies.
+        self.data['discounted_ret'][path_slice] = discount_cumsum(
+            self.data['reward'][path_slice],
+            self._gamma,
+        )
         rewards -= self._penalty_coefficient * costs
 
         adv_r, target_value_r = self._calculate_adv_and_value_targets(

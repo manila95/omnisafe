@@ -61,6 +61,7 @@ class PolicyGradient(BaseAlgo):
     _mc_probe_seeds: list[int] | None = None
     # Set by learn() each epoch; read by _update's train-side diagnostics.
     _current_epoch: int = 0
+    _pending_scatter_draw: tuple[int, torch.device] | None = None
     # Dedicated eval envs, kept separate from self._env so training's own vectorization
     # (train_cfgs.vector_env_nums) is independent of the studies' parallelism, and so the
     # studies' ObsNormalize can be a frozen snapshot rather than drifting with their rollouts.
@@ -370,6 +371,33 @@ class PolicyGradient(BaseAlgo):
         effective_eval_freq = early_eval_freq if epoch < early_eval_epochs else eval_freq
         return epoch == 1 or (epoch > 0 and epoch % effective_eval_freq == 0)
 
+    def _consume_scatter_rng(self) -> None:
+        """Advance the RNG exactly as MICE's eval diagnostics do, for bit-parity.
+
+        MICE draws ``torch.randperm(n)`` to subsample points for the scatter images its
+        ``_log_critic_diagnostics`` logs. Those plots are not reproduced here, but the draw
+        still has to happen: the global torch RNG is what the next epoch's rollout samples
+        actions from, so a run that skips it diverges from MICE on the epoch *after* the first
+        eval -- even though the eval itself is identical.
+
+        Position matters as much as the draw. MICE takes it at the very end of ``_update``,
+        after the critic loop's ``DataLoader(shuffle=True)`` has drawn its per-iteration seeds
+        -- not alongside the diagnostics, which run before the update. So this is called from
+        the end of each ``_update`` that MICE instruments (here, ``natural_pg``, ``focops``)
+        rather than after ``self._update()`` returns in ``learn()``: CUP runs a second policy
+        phase with its own shuffled ``DataLoader`` *after* ``super()._update()``, and a draw
+        placed after the whole chain would land on the wrong side of it.
+
+        Only fires on the eval epochs where MICE would have plotted; ``_pending_scatter_draw``
+        is set by ``_log_train_critic_diagnostics`` after its ``eval_critic`` /
+        ``_is_value_eval_epoch`` guards, so a run with eval off consumes nothing.
+        """
+        if self._pending_scatter_draw is None:
+            return
+        n, device = self._pending_scatter_draw
+        self._pending_scatter_draw = None
+        torch.randperm(n, device=device)
+
     def _run_eval_studies(self, epoch: int) -> None:
         """Run this epoch's value studies, if due, and persist the results.
 
@@ -568,6 +596,8 @@ class PolicyGradient(BaseAlgo):
             return
 
         obs = data['obs']
+        # MICE subsamples here for its scatter plots; see _consume_scatter_rng.
+        self._pending_scatter_draw = (obs.shape[0], obs.device)
         pred_r = self._actor_critic.reward_critic(obs)[0].flatten()
         streams = {'r': (pred_r, data['target_value_r'].flatten())}
         if self._cfgs.algo_cfgs.use_cost:
@@ -702,6 +732,7 @@ class PolicyGradient(BaseAlgo):
                 'Train/KL': final_kl,
             },
         )
+        self._consume_scatter_rng()
 
     def _update_reward_critic(self, obs: torch.Tensor, target_value_r: torch.Tensor) -> None:
         r"""Update value network under a double for loop.

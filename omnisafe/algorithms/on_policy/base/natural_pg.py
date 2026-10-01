@@ -228,3 +228,4 @@ class NaturalPG(PolicyGradient):
                 'Value/Adv': adv_r.mean().item(),
             },
         )
+        self._consume_scatter_rng()

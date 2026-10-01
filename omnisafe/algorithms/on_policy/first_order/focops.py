@@ -228,3 +228,4 @@ class FOCOPS(PolicyGradient):
                 'Metrics/LagrangeMultiplier': self._lagrange.lagrangian_multiplier,
             },
         )
+        self._consume_scatter_rng()
