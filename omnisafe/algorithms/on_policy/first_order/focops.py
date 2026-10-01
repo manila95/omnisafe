@@ -155,6 +155,7 @@ class FOCOPS(PolicyGradient):
         self._lagrange.update_lagrange_multiplier(Jc)
 
         data = self._buf.get()
+        self._sr_prepare_update(data)
         obs, act, logp, target_value_r, target_value_c, adv_r, adv_c = (
             data['obs'],
             data['act'],

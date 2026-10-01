@@ -195,6 +195,7 @@ class NaturalPG(PolicyGradient):
             accepted.
         """
         data = self._buf.get()
+        self._sr_prepare_update(data)
         obs, act, logp, target_value_r, target_value_c, adv_r, adv_c = (
             data['obs'],
             data['act'],
@@ -206,8 +207,9 @@ class NaturalPG(PolicyGradient):
         )
         self._update_actor(obs, act, logp, adv_r, adv_c)
 
+        target_sr = data['target_sr'] if self._sr_td_ridge else torch.zeros_like(target_value_r)
         dataloader = DataLoader(
-            dataset=TensorDataset(obs, target_value_r, target_value_c),
+            dataset=TensorDataset(obs, target_value_r, target_value_c, target_sr),
             batch_size=self._cfgs.algo_cfgs.batch_size,
             shuffle=True,
         )
@@ -217,10 +219,13 @@ class NaturalPG(PolicyGradient):
                 obs,
                 target_value_r,
                 target_value_c,
+                target_sr,
             ) in dataloader:
                 self._update_reward_critic(obs, target_value_r)
                 if self._cfgs.algo_cfgs.use_cost:
                     self._update_cost_critic(obs, target_value_c)
+                if self._sr_td_ridge:
+                    self._update_successor_features(obs, target_sr)
 
         self._logger.store(
             {

@@ -94,6 +94,9 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
         standardized_adv_r: bool = False,
         standardized_adv_c: bool = False,
         device: torch.device = DEVICE_CPU,
+        sr_dim: int | None = None,
+        lam_sr: float = 0.95,
+        gamma_sr: float | None = None,
     ) -> None:
         """Initialize an instance of :class:`OnPolicyBuffer`."""
         super().__init__(obs_space, act_space, size, device)
@@ -108,6 +111,21 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
         self.data['value_c'] = torch.zeros((size,), dtype=torch.float32, device=device)
         self.data['target_value_c'] = torch.zeros((size,), dtype=torch.float32, device=device)
         self.data['logp'] = torch.zeros((size,), dtype=torch.float32, device=device)
+
+        # td_ridge successor representation: the vector-valued feature stream, trained with the
+        # same estimator machinery as the scalar reward/cost streams. phi/psi are the one-step and
+        # successor features as evaluated during the rollout; target_sr is the lambda-target psi
+        # is regressed onto.
+        self._sr_dim: int | None = sr_dim
+        self._lam_sr: float = lam_sr
+        self._gamma_sr: float = gamma if gamma_sr is None else gamma_sr
+        if sr_dim is not None:
+            for key in ('phi', 'psi', 'target_sr'):
+                self.data[key] = torch.zeros((size, sr_dim), dtype=torch.float32, device=device)
+        # Episode boundaries, needed by the contrastive phi objective to sample temporal pairs
+        # within an episode. Captured at get() time, since finish_path resets them.
+        self._episode_slices: list[tuple[int, int]] = []
+        self._last_episode_slices: list[tuple[int, int]] = []
 
         self._gamma: float = gamma
         self._lam: float = lam
@@ -149,6 +167,7 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
         self,
         last_value_r: torch.Tensor | None = None,
         last_value_c: torch.Tensor | None = None,
+        last_psi: torch.Tensor | None = None,
     ) -> None:
         """Finish the current path and calculate the advantages of state-action pairs.
 
@@ -166,6 +185,8 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
                 Defaults to torch.zeros(1).
             last_value_c (torch.Tensor, optional): The value of the last state of the current path.
                 Defaults to torch.zeros(1).
+            last_psi (torch.Tensor, optional): Successor feature of the last state of the current
+                path (``td_ridge`` only). Defaults to torch.zeros(sr_dim).
         """
         if last_value_r is None:
             last_value_r = torch.zeros(1, device=self._device)
@@ -206,6 +227,21 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
         self.data['adv_c'][path_slice] = adv_c
         self.data['target_value_c'][path_slice] = target_value_c
 
+        if self._sr_dim is not None:
+            if last_psi is None:
+                last_psi = torch.zeros(self._sr_dim, device=self._device)
+            last_psi = last_psi.to(self._device).reshape(1, self._sr_dim)
+            # Mirrors the scalar case: the bootstrap is appended to the "reward" stream too, so
+            # rewards-to-go style targets fold in the truncation bootstrap the same way.
+            _, target_sr = self._calculate_adv_and_value_targets(
+                torch.cat([self.data['psi'][path_slice], last_psi], dim=0),
+                torch.cat([self.data['phi'][path_slice], last_psi], dim=0),
+                lam=self._lam_sr,
+                gamma=self._gamma_sr,
+            )
+            self.data['target_sr'][path_slice] = target_sr
+
+        self._episode_slices.append((self.path_start_idx, self.ptr))
         self.path_start_idx = self.ptr
 
     def get(self) -> dict[str, torch.Tensor]:
@@ -222,6 +258,12 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
             The data stored and calculated in the buffer.
         """
         self.ptr, self.path_start_idx = 0, 0
+        # Guarded so get() stays idempotent: it is called twice per epoch (once by the eval
+        # studies, once by _update), and an unguarded move would leave the second call with no
+        # episode boundaries at all.
+        if self._episode_slices:
+            self._last_episode_slices = list(self._episode_slices)
+            self._episode_slices = []
 
         data = {
             'obs': self.data['obs'],
@@ -233,6 +275,15 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
             'adv_c': self.data['adv_c'],
             'target_value_c': self.data['target_value_c'],
         }
+
+        if self._sr_dim is not None:
+            data['phi'] = self.data['phi']
+            data['psi'] = self.data['psi']
+            data['target_sr'] = self.data['target_sr']
+            # The ridge read-out regresses the immediate reward/cost onto phi, so the raw
+            # one-step streams have to come out of the buffer too.
+            data['reward'] = self.data['reward']
+            data['cost'] = self.data['cost']
 
         adv_mean, adv_std, *_ = distributed.dist_statistics_scalar(data['adv_r'])
         cadv_mean, *_ = distributed.dist_statistics_scalar(data['adv_c'])
@@ -248,6 +299,7 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
         values: torch.Tensor,
         rewards: torch.Tensor,
         lam: float,
+        gamma: float | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Compute the estimated advantage.
 
@@ -302,18 +354,19 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
         Raises:
             NotImplementedError: If the advantage estimator is not supported.
         """  # pylint: disable=line-too-long
+        gamma = self._gamma if gamma is None else gamma
         if self._advantage_estimator == 'gae':
             # GAE formula: A_t = \sum_{k=0}^{n-1} (lam*gamma)^k delta_{t+k}
-            deltas = rewards[:-1] + self._gamma * values[1:] - values[:-1]
-            adv = discount_cumsum(deltas, self._gamma * lam)
+            deltas = rewards[:-1] + gamma * values[1:] - values[:-1]
+            adv = discount_cumsum(deltas, gamma * lam)
             target_value = adv + values[:-1]
 
         elif self._advantage_estimator == 'gae-rtg':
             # GAE formula: A_t = \sum_{k=0}^{n-1} (lam*gamma)^k delta_{t+k}
-            deltas = rewards[:-1] + self._gamma * values[1:] - values[:-1]
-            adv = discount_cumsum(deltas, self._gamma * lam)
+            deltas = rewards[:-1] + gamma * values[1:] - values[:-1]
+            adv = discount_cumsum(deltas, gamma * lam)
             # compute rewards-to-go, to be targets for the value function update
-            target_value = discount_cumsum(rewards, self._gamma)[:-1]
+            target_value = discount_cumsum(rewards, gamma)[:-1]
 
         elif self._advantage_estimator == 'vtrace':
             #  v_s = V(x_s) + \sum^{T-1}_{t=s} \gamma^{t-s}
@@ -326,15 +379,15 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
                 values=values,
                 rewards=rewards,
                 behavior_action_probs=action_probs,
-                gamma=self._gamma,
+                gamma=gamma,
                 rho_bar=1.0,
                 c_bar=1.0,
             )
 
         elif self._advantage_estimator == 'plain':
             # A(x, u) = Q(x, u) - V(x) = r(x, u) + gamma V(x+1) - V(x)
-            adv = rewards[:-1] + self._gamma * values[1:] - values[:-1]
-            target_value = discount_cumsum(rewards, self._gamma)[:-1]
+            adv = rewards[:-1] + gamma * values[1:] - values[:-1]
+            target_value = discount_cumsum(rewards, gamma)[:-1]
 
         else:
             raise NotImplementedError

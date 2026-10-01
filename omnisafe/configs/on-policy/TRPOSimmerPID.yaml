@@ -151,6 +151,44 @@ defaults:
     window_lens: 100
   # model configurations
   model_cfgs:
+    # whether the critics are read-outs of a shared successor-representation trunk
+    use_successor_representation: False
+    # successor-representation settings, used only when use_successor_representation is True.
+    # V(s) = psi(s) . w, with psi the discounted sum of a one-step feature stream phi and w the
+    # ridge solution of the immediate reward/cost onto phi.
+    sr_cfgs:
+      # only "td_ridge" is implemented here
+      sr_mode: td_ridge
+      # dimensionality of phi / psi
+      sr_dim: 64
+      # hidden sizes of the trunk psi is read from; empty makes the trunk an identity
+      hidden_sizes: [64, 64]
+      activation: tanh
+      # learning rate of the psi TD loss
+      lr: 0.0003
+      # lambda / discount of the psi lambda-target; gamma_sr null reuses algo_cfgs.gamma
+      lam_sr: 0.95
+      gamma_sr: ~
+      # ridge coefficient, scaling the Gram matrix's mean diagonal. ridge_kappa_cost null makes
+      # the cost read-out share ridge_kappa.
+      ridge_kappa: 0.001
+      ridge_kappa_cost: ~
+      # EMA blend of each ridge solve into the stored weights; 1.0 replaces outright
+      ema_tau: 1.0
+      # where phi comes from: "random" (a frozen linear projection) or "contrastive" (an MLP
+      # trained by the time-contrastive InfoNCE loss below)
+      phi_source: random
+      # hidden sizes of the standalone phi network ("contrastive" only)
+      phi_hidden_sizes: [64, 64]
+      # learning rate of the phi loss; null reuses lr
+      phi_lr: ~
+      # time-contrastive settings ("contrastive" only). Pretrain once at epoch 0, then adapt a
+      # little every epoch.
+      phi_contrastive_temperature: 0.1
+      phi_contrastive_horizon: 5
+      phi_contrastive_pretrain_steps: 500
+      phi_contrastive_steps_per_epoch: 50
+      phi_contrastive_batch_size: ~
     # weight initialization mode
     weight_initialization_mode: "kaiming_uniform"
     # actor type, options: gaussian, gaussian_learning
