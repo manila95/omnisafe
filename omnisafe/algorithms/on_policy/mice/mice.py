@@ -2,7 +2,6 @@
 
 import time
 from typing import Dict, Tuple, Optional, Union
-import numpy as np
 import torch
 
 
@@ -52,15 +51,6 @@ class MICE(CPO):
             penalty_coefficient=self._cfgs.algo_cfgs.penalty_coef,
             num_envs=self._cfgs.train_cfgs.vector_env_nums,
             device=self._device,
-            constant_cost=self._cfgs.algo_cfgs.constant_cost,
-            cost_decay_type=self._cfgs.algo_cfgs.cost_decay_type,
-            cost_decay_rate=self._cfgs.algo_cfgs.cost_decay_rate,
-            cost_decay_step_interval=self._cfgs.algo_cfgs.cost_decay_step_interval,
-            cost_decay_factor=self._cfgs.algo_cfgs.cost_decay_factor,
-            no_intrinsic_in_deltas=self._cfgs.algo_cfgs.no_intrinsic_in_deltas,
-            cost_gamma=getattr(self._cfgs.algo_cfgs, 'cost_gamma', None),
-            constant_cost_source=getattr(self._cfgs.algo_cfgs, 'constant_cost_source', 'fixed'),
-            cost_limit=self._cfgs.algo_cfgs.cost_limit,
         )
 
         self._RPNet = utl.RandomProjection(self._env.observation_space.shape[0], self._cfgs.model_cfgs.emb_dim).to(
@@ -71,23 +61,15 @@ class MICE(CPO):
 
     def _init_log(self) -> None:
         super()._init_log()
-        # Only MICE's learn() stores this; the base does not track a running cost total.
-        self._logger.register_key('Metrics/TotalCost')
         self._logger.register_key('Train/intrinsic_costs')
         self._logger.register_key('Train/discount_ci')
         self._logger.register_key('Train/intrinsic_factor')
-        self._logger.register_key('Train/log_beta')
-        if (
-            self._cfgs.algo_cfgs.constant_cost is not None
-            or getattr(self._cfgs.algo_cfgs, 'constant_cost_source', 'fixed') in ('ep_cost', 'excess_cost')
-        ):
-            self._logger.register_key('Train/effective_constant_cost')
         self._logger.register_key('Value/Adv_c')
+        
 
     def learn(self) -> Tuple[Union[int, float], ...]:
         start_time = time.time()
         self._logger.log('INFO: Start training')
-        total_cost: float = 0.0
 
         for epoch in range(self._cfgs.train_cfgs.epochs):
             epoch_time = time.time()
@@ -107,32 +89,14 @@ class MICE(CPO):
                 )
             )
 
-            # Shared with CPO/PolicyGradient -- runs estimate_true_value (test_estimate),
-            # mc_value_study, intermediate_state_study + pooled correlation/gradient-alignment,
-            # and persists this epoch's eval data/scatter grid/checkpoint on the same cadence.
-            # See PolicyGradient._run_eval_studies's docstring for why this lives there and not
-            # duplicated here.
+            # After the rollout and before _update(), so the critic evaluated is the one that
+            # produced this epoch's advantages. Replaces MICE's own test_estimate hook.
             self._run_eval_studies(epoch)
+
             self._logger.store({'Time/Rollout': time.time() - rollout_time})
 
             update_time = time.time()
-            self._current_epoch = epoch
             self._update()
-            total_cost += self._env._epoch_cost_sum
-            self._logger.store({'Metrics/TotalCost': total_cost})
-            # Scatter/histogram diagnostics are not reproduced here; none consume torch RNG.
-            self._logger.store({'Train/log_beta': np.log(max(self._epoch_beta, 1e-10))})
-            constant_cost_source = getattr(self._cfgs.algo_cfgs, 'constant_cost_source', 'fixed')
-            if self._cfgs.algo_cfgs.constant_cost is not None or constant_cost_source in ('ep_cost', 'excess_cost'):
-                current_ep_cost = None
-                if constant_cost_source in ('ep_cost', 'excess_cost'):
-                    val = self._logger.get_stats('Metrics/EpCost')[0]
-                    current_ep_cost = val if val == val else None  # val==val is False iff NaN
-                self._logger.store({
-                    'Train/effective_constant_cost': self._buf.get_effective_constant_cost(
-                        epoch, current_ep_cost,
-                    ),
-                })
             self._logger.store({'Time/Update': time.time() - update_time})
 
             if self._cfgs.model_cfgs.exploration_noise_anneal:
@@ -174,8 +138,6 @@ class MICE(CPO):
 
     def _update(self) -> None:
         data = self._buf.get()
-        train_data = data
-
         (
             obs,
             act,
@@ -185,24 +147,19 @@ class MICE(CPO):
             adv_r,
             adv_c,
             intrinsic_costs,
-            balancing_ep_dicount_ci,
+            balancing_ep_dicount_ci, 
+            
         ) = (
-            train_data['obs'],
-            train_data['act'],
-            train_data['logp'],
-            train_data['target_value_r'],
-            train_data['target_value_c'],
-            train_data['adv_r'],
-            train_data['adv_c'],
-            train_data['intrinsic_costs'],
-            train_data['ep_discount_ci'],
+            data['obs'],
+            data['act'],
+            data['logp'],
+            data['target_value_r'],
+            data['target_value_c'],
+            data['adv_r'],
+            data['adv_c'],
+            data['intrinsic_costs'], 
+            data['ep_discount_ci'], 
         )
-        self._epoch_beta_ = train_data['beta_']
-        self._epoch_beta = data['beta'].mean().item()
-        self._epoch_deltas_n = train_data['deltas_n']
-        self._epoch_deltas_n_mc = train_data['deltas_n_mc']
-        self._epoch_intrinsic_costs = train_data['intrinsic_costs']
-        self._epoch_time_step = train_data['time_step']
         self._update_actor(obs, act, logp, adv_r, adv_c, intrinsic_costs, balancing_ep_dicount_ci)
 
         dataloader = DataLoader(
@@ -271,23 +228,11 @@ class MICE(CPO):
 
         ep_discount_ci = balancing_ep_dicount_ci.mean().item()
 
-        self._logger.store({'Train/discount_ci': ep_discount_ci,
+        self._logger.store({'Train/discount_ci': ep_discount_ci, 
                             'Train/intrinsic_factor': self._cfgs.algo_cfgs.intrinsic_factor,
                             })
-        # ep_discount_ci is unconditional here regardless of algo_cfgs.no_intrinsic_in_deltas --
-        # that flag only zeroes intrinsic cost out of deltas_n (hence adv_c/target_value_c, see
-        # mice_buffer.py's _calculate_balancing_intrinsic_adv_and_value_targets), a completely
-        # separate code path from this one. So even with no_intrinsic_in_deltas: True, a nonzero
-        # constant_cost/KNN novelty signal was still silently biasing self.ep_costs -- and
-        # therefore CPO's optim-case selection below -- with no way to turn it off. This flag is
-        # that missing switch, named to match no_intrinsic_in_deltas's own convention: default
-        # False reproduces the exact prior behavior (always added); True skips the addition here
-        # while leaving Train/discount_ci logged either way, for diagnostic visibility regardless
-        # of whether it's actually being used. See CPO's algo_cfgs.use_cost_bias (cpo.py) for the
-        # generalized, MICE-independent version of this same lever.
-        if not getattr(self._cfgs.algo_cfgs, 'no_intrinsic_in_ep_costs', False):
-            self.ep_costs += ep_discount_ci
-
+        self.ep_costs += ep_discount_ci
+        
 
         p = conjugate_gradients(self._fvp, b_grads, self._cfgs.algo_cfgs.cg_iters)  # H^-1*b
         q = xHx
