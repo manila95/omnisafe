@@ -18,6 +18,7 @@ from omnisafe.algorithms.on_policy import (
     base,
     early_terminated,
     first_order,
+    mice,
     naive_lagrange,
     penalty_function,
     pid_lagrange,
@@ -29,6 +30,7 @@ from omnisafe.algorithms.on_policy import (
 from omnisafe.algorithms.on_policy.base import PPO, TRPO, NaturalPG, PolicyGradient
 from omnisafe.algorithms.on_policy.early_terminated import PPOEarlyTerminated, TRPOEarlyTerminated
 from omnisafe.algorithms.on_policy.first_order import CUP, FOCOPS
+from omnisafe.algorithms.on_policy.mice import MICE
 from omnisafe.algorithms.on_policy.naive_lagrange import PDO, RCPO, PPOLag, TRPOLag
 from omnisafe.algorithms.on_policy.penalty_function import IPO, P3O
 from omnisafe.algorithms.on_policy.pid_lagrange import CPPOPID, TRPOPID
@@ -42,6 +44,7 @@ __all__ = [
     *base.__all__,
     *early_terminated.__all__,
     *first_order.__all__,
+    *mice.__all__,
     *naive_lagrange.__all__,
     *primal.__all__,
     *penalty_function.__all__,

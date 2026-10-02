@@ -44,6 +44,9 @@ class OnPolicyAdapter(OnlineAdapter):
     _ep_cost: torch.Tensor
     _ep_len: torch.Tensor
 
+    # Running total of raw cost over the epoch; MICE logs it as Metrics/TotalCost.
+    _epoch_cost_sum: float = 0.0
+
     def __init__(  # pylint: disable=too-many-arguments
         self,
         env_id: str,
@@ -178,6 +181,7 @@ class OnPolicyAdapter(OnlineAdapter):
         """
         self._ep_ret += info.get('original_reward', reward).cpu()
         self._ep_cost += info.get('original_cost', cost).cpu()
+        self._epoch_cost_sum += info.get('original_cost', cost).sum().item()
         self._ep_len += 1
 
     def _log_metrics(self, logger: Logger, idx: int) -> None:

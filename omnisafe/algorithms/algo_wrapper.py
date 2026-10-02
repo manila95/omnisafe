@@ -155,6 +155,12 @@ class AlgoWrapper:
         ):
             # re-launches the current script with workers linked by MPI
             sys.exit()
+        # set_num_threads caps only the intra-op pool; the inter-op pool otherwise defaults to
+        # the core count. Can only be set before any parallel work has run.
+        try:
+            torch.set_num_interop_threads(1)
+        except RuntimeError:
+            pass
         if self.cfgs.train_cfgs.device == 'cpu':
             torch.set_num_threads(self.cfgs.train_cfgs.torch_threads)
         else:

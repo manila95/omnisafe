@@ -1,0 +1,364 @@
+# Copyright 2023 OmniSafe Team. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+
+defaults:
+  # seed for random number generator
+  seed: 0
+  # training configurations
+  train_cfgs:
+    # device to use for training, options: cpu, cuda, cuda:0, cuda:0,1, etc.
+    device: cuda:1
+    # number of threads for torch
+    torch_threads: 16
+    # number of vectorized environments
+    vector_env_nums: 10
+    # number of parallel agent, similar to a3c
+    parallel: 1
+    # total number of steps to train
+    total_steps: 10000000
+  # algorithm configurations
+  algo_cfgs:
+    # number of steps to update the policy
+    steps_per_epoch: 20000
+    # number of iterations to update the policy
+    update_iters: 10
+    # batch size for each iteration
+    batch_size: 128
+    # target kl divergence
+    target_kl: 0.01
+    # entropy coefficient
+    entropy_coef: 0.0
+    # normalize reward
+    reward_normalize: True
+    # normalize cost
+    cost_normalize: True
+    # normalize observation
+    obs_normalize: True
+    # early stop when kl divergence is bigger than target kl
+    kl_early_stop: False
+    # use max gradient norm
+    use_max_grad_norm: True
+    # max gradient norm
+    max_grad_norm: 40.0
+    # use critic norm
+    use_critic_norm: True
+    # critic norm coefficient
+    critic_norm_coef: 0.001
+    # critic norm coefficient for the cost critic only; null = reuse critic_norm_coef. Same
+    # null-fallback convention as sr_cfgs.ridge_kappa_cost / w_weight_decay_cost.
+    # reward discount factor
+    gamma: 0.99
+    # cost discount factor
+    cost_gamma: 0.99
+    # lambda for gae
+    lam: 0.95
+    # lambda for cost gae
+    lam_c: 0.95
+    # advantage estimation method, options: gae, retrace
+    adv_estimation_method: gae
+    # The critic's regression target, chosen INDEPENDENTLY of the advantage above.
+    # 'td_lambda' | 'mc' | 'td_zero' | 'vtrace'; null keeps the legacy coupling where
+    # adv_estimation_method picked both axes at once (see omnisafe.utils.gae.ADV_TARGET_PRESETS:
+    # gae -> td_lambda, plain -> mc, td_zero -> td_zero, gae-rtg -> mc, reinforce -> mc).
+    #
+    # Why this exists: those two choices were welded together, so only 6 of the 3x3 combinations
+    # were reachable -- "TD(0) advantage with a TD(lambda) target" could not be expressed at all.
+    # Worse for experiments, comparing two estimators silently varied BOTH axes: plain vs gae is
+    # (TD(0) adv, MC target) vs (GAE adv, TD(lambda) target), so a difference between them cannot
+    # be attributed to either one. Setting this pins the target while adv_estimation_method
+    # varies, or vice versa.
+    # Cost-side override; null falls back to value_target_method -- same convention as
+    # cost_gamma / lam_c / cost_adv_estimation_method. Note the cost target uses cost_gamma and
+    # lam_c, not gamma/lam.
+    # standardize reward advantage
+    standardized_rew_adv: True
+    # standardize cost advantage
+    standardized_cost_adv: True
+    # penalty coefficient
+    penalty_coef: 0.0
+    # use cost
+    use_cost: True
+    # Damping value for conjugate gradient
+    cg_damping: 0.1
+    # Number of conjugate gradient iterations
+    cg_iters: 15
+    # Subsampled observation
+    fvp_obs: None
+    # Tolerance of constraint violation
+    cost_limit: 25
+    # The sub-sampling rate of the observation
+    fvp_sample_freq: 1
+    # buf_size
+    buf_maxlen: 100
+    # intrinsic factor
+    intrinsic_factor: 5.0
+    # k in knn
+    k_knn: 10
+    # constant intrinsic cost added to every transition (None to use KNN-based intrinsic cost).
+    # Only read when constant_cost_source is 'fixed' -- ignored entirely under 'ep_cost'/'excess_cost'.
+    constant_cost: ~
+    # decay schedule for constant_cost: None (no decay), 'exponential', or 'step'. Only read
+    # when constant_cost_source is 'fixed' -- 'ep_cost'/'excess_cost' never decay (see below).
+    cost_decay_type: ~
+    # exponential: effective_cost = constant_cost * cost_decay_rate^epoch
+    # half-life ~46 epochs → ~1% of initial value by epoch 300
+    cost_decay_rate: 0.985
+    # step: effective_cost = constant_cost * cost_decay_factor^(epoch // cost_decay_step_interval)
+    # factor=0.4, interval=50 → 6 drops → ~0.4% of initial value by epoch 300
+    cost_decay_step_interval: 50
+    cost_decay_factor: 0.4
+    # How the "constant" intrinsic cost is determined once constant_cost (or one of the two
+    # self-tracking modes below) is active, instead of the default KNN-based novelty signal:
+    #   'fixed'       -- constant_cost (optionally annealed by cost_decay_type above). Must set
+    #                    constant_cost to a float for this mode to actually trigger.
+    #   'ep_cost'     -- self-tracking: every path uses the live running mean of Metrics/EpCost
+    #                    (the same rolling-window stat CPO's own trust-region step reads),
+    #                    refreshed as episodes complete. Never goes to zero even once the
+    #                    constraint is satisfied -- it tracks EpCost itself, not the violation.
+    #   'excess_cost' -- same live-tracking idea, but clamped to max(Metrics/EpCost - cost_limit,
+    #                    0.0): how far over budget the policy currently is, not its raw cost.
+    #                    Self-extinguishing -- goes to exactly 0 once EpCost <= cost_limit, rather
+    #                    than continuing to apply a deflation the policy no longer needs. Always
+    #                    >= 0 by construction. Reads algo_cfgs.cost_limit (same value CPO's own
+    #                    trust-region check uses).
+    # Both 'ep_cost' and 'excess_cost' ignore constant_cost/cost_decay_type entirely -- no decay
+    # schedule applies since the value already moves with training. Before any episode anywhere
+    # in the run has completed (empty logger window), both fall back to 0.0 (no intrinsic
+    # penalty yet) rather than erroring.
+    constant_cost_source: fixed
+    # if True, intrinsic_costs are zeroed out of deltas_n. Under the default KNN-adaptive
+    # mechanism (constant_cost unset) this only affects the deltas_n diagnostic scatter plots and
+    # the beta-adaptation-rate signal -- the real adv_c/target_value_c (built from a separately-
+    # computed `deltas` that always includes beta*intrinsic_costs) is unaffected. Under any
+    # constant_cost mode ('fixed'/'ep_cost'/'excess_cost') there is no separate `deltas` --
+    # deltas_n IS what feeds adv_c/target_value_c directly, so here this flag actually strips the
+    # constant intrinsic cost out of the cost critic's target and the cost-advantage
+    # policy-gradient term too, not just the diagnostics. The intrinsic cost still reaches the
+    # CPO trust-region feasibility check via ep_discount_ci regardless of this flag either way --
+    # see no_intrinsic_in_ep_costs below for the separate switch that controls that.
+    no_intrinsic_in_deltas: False
+    # if True, skip adding ep_discount_ci (the discounted per-episode total of the intrinsic
+    # cost/constant_cost) onto self.ep_costs before CPO's optim-case selection in _update_actor.
+    # A completely separate code path from no_intrinsic_in_deltas above -- that flag only touches
+    # deltas_n/adv_c/target_value_c, never ep_discount_ci, so even with no_intrinsic_in_deltas:
+    # True the intrinsic cost was still silently biasing which OptimCase branch gets taken; this
+    # is the switch that actually turns that off. Train/discount_ci is still logged either way,
+    # just not added to self.ep_costs when this is True. False (default) reproduces the exact
+    # prior behavior (always added, unconditionally). See algo_cfgs.use_cost_bias in CPO.yaml for
+    # the generalized, MICE-independent version of this same lever (there it's opt-IN rather than
+    # opt-out, since plain CPO has no such bias by default).
+    no_intrinsic_in_ep_costs: False
+    # eval frequency for the first 100 epochs (higher cadence for early monitoring)
+    early_eval_freq: 5
+    # width of the early_eval_freq window: epochs below this use early_eval_freq, epochs at or
+    # above it use value_eval_freq. Was hard-coded to 100. An eval epoch costs ~240 s against a
+    # ~9 s training epoch, so this is a direct lever on total eval cost that, unlike cutting
+    # repeats/positions, leaves every individual measurement exactly as trustworthy.
+    early_eval_epochs: 50
+    value_eval_freq: 50
+    # whether to run the full-episode true-vs-estimated value calibration rollout
+    # (see omnisafe.utils.value_eval.estimate_true_value). Off by default: it's a one-sample-
+    # per-state proxy (a single fresh rollout per probe, freshly reset each eval epoch) that
+    # mc_value_study/intermediate_state_study superseded with a genuine MC-repeated estimate on
+    # fixed/on-policy probes -- see their own comments below. Running both (the old way and the
+    # new way) was useful for validating the new studies against the old baseline; now that
+    # that's done, this just triples eval-epoch cost (Eval_s0/Eval_all's own eval_episodes
+    # rollouts, on top of the MC studies') for numbers the MC studies already supersede.
+    # number of full episodes rolled out per calibration eval (see test_estimate above)
+    # same-layout Monte-Carlo value study (see omnisafe.utils.value_eval.
+    # estimate_true_value_same_state_mc): compares the critic against a genuine MC estimate --
+    # mc_value_study_repeats independent same-seed (same procedurally-generated layout) rollouts
+    # per probe state, rather than estimate_true_value's one-sample-per-state proxy. Off by
+    # default: it is len(mc_value_study_probes) * mc_value_study_repeats extra full episodes on
+    # every eval epoch, on top of test_estimate's own eval_episodes. Enabled by default here.
+    # Master switch for ALL critic evaluation. True/False turns on/off, together:
+    #   - the same-layout Monte-Carlo s0 study (fresh probe rollouts),
+    #   - the on-policy intermediate-state study (snapshot/restore rollouts),
+    #   - the critic diagnostics computed on the training batch itself (Value/Train/*,
+    #     Value/Val/*, the BeforeUpdate/AfterUpdate scatter plots), and with them the SR
+    #     diagnostics under sr_mode: 'td_ridge' (phi/psi ranks, ridge R^2, explained variance).
+    # These were separate switches; nothing ever wanted some and not others, and "evaluation off"
+    # that still wrote Value/Train/* was a trap. The per-study *settings* below
+    # (probes/repeats/positions/...) are unchanged and still tune each one independently.
+    #
+    # This is what a run's wall-clock is mostly made of: an eval epoch costs ~240 s against a ~9 s
+    # training epoch, so False takes a 500-epoch run from ~2.6 h to ~1.3 h. (test_estimate is a
+    # separate, superseded diagnostic and has its own flag.)
+    eval_critic: True
+    # number of fixed probe states (env reset seeds), held constant for the whole run
+    mc_value_study_probes: 17
+    # independent same-layout rollouts averaged per probe state -- 10 (not the original 5): the
+    # split-half reliability analysis (see the session history / git log around
+    # mc_eval_bootstrap_threshold) found n=5 badly under-samples cost specifically (split-half
+    # correlation as low as ~0.6-0.9 per category, sometimes literally undefined at bursty/rare-
+    # cost positions), while n=10 combined with mc_eval_bootstrap_threshold=0.01 costs about the
+    # same wall-clock as the old n=5/no-truncation default.
+    mc_value_study_repeats: 10
+    # base offset for the probe seeds (probes use seed_offset .. seed_offset+probes-1), chosen
+    # well outside the training seed range so probe layouts never coincide with a training seed
+    mc_value_study_seed_offset: 100000
+    # number of probe rollouts run concurrently (subprocess-parallel vectorized env), instead of
+    # the mc_value_study_probes * mc_value_study_repeats rollouts running one at a time on a
+    # single env -- this was ~80% of wall-clock in the value-function estimation study. Each
+    # probe still gets its own independent reset(seed=X); this only parallelizes across probes,
+    # it does not change what's computed. Set to 1 to fall back to the original sequential
+    # behavior. Pick based on free CPU cores, accounting for train_cfgs.vector_env_nums and
+    # however many other runs share the machine -- e.g. 20 (giving a clean 500/20=25 waves at the
+    # defaults above) on a lightly-loaded 16+-core box.
+    mc_value_study_vector_envs: 5
+    # How the truncated tail is handled when mc_eval_bootstrap_threshold is set (it is, by
+    # default). Required then; null makes a non-null threshold raise rather than silently
+    # biasing every value.
+    #   'drop'      -- stop accumulating. The value is the exact truncated discounted sum, low by
+    #                  at most bootstrap_threshold of its own scale (1% at 0.01), one-sided and
+    #                  analytically known. Stays simulation-only, so a cost value is still
+    #                  non-negative, and the critic -- the thing these studies validate -- never
+    #                  enters the "ground truth".
+    #   'bootstrap' -- estimate the tail with the critic's own value there. Unbiased in principle,
+    #                  circular in practice: an untrained V_c made 14.4% of per-rollout cost
+    #                  returns negative, which a non-negative cost signal cannot produce. This is
+    #                  what commit abf5ff3 turned off by default.
+    # Ignored when bootstrap_threshold is null (full horizon, no approximation).
+    mc_eval_tail: drop
+    # Truncate mc_value_study/intermediate_state_study rollouts early once both streams'
+    # discounted tail contribution drops below this fraction (see
+    # omnisafe.utils.value_eval._effective_rollout_horizon). At gamma=0.99, 0.01 stops at step
+    # 459 of 1000 -- 2.18x fewer simulated steps, and eval is ~85% of a run's wall-clock.
+    #
+    # What the default 0.01 costs, paired with mc_eval_tail: drop above: every "true" MC value is
+    # low by at most 1% of its own scale. That bias is one-sided and analytically known (it is
+    # exactly the dropped geometric tail), not noise -- so it does NOT average out across seeds.
+    # It shifts EstimationError_* by ~1% of the true value; Correlation_* is near-untouched,
+    # being close to a monotone rescaling.
+    #
+    # Set to null for the exact, bias-free quantity these studies mean to measure, at ~2.2x the
+    # eval wall-clock. Prefer that when an absolute value level is the result being reported;
+    # 0.01 is the right default when the questions are about calibration trends and correlations.
+    mc_eval_bootstrap_threshold: 0.01
+    # On-policy intermediate-state value study (see omnisafe.utils.value_eval.
+    # estimate_value_from_snapshots and omnisafe.utils.state_snapshot): the same same-state MC
+    # trick mc_value_study uses for s0, but for states the CURRENT policy actually visits
+    # mid-episode -- captured via an exact simulator-state snapshot/restore (not just a re-seeded
+    # reset, since these states aren't reachable that way), from a dedicated on-policy collection
+    # rollout run fresh every eval epoch. Adds meaningful eval-epoch cost (positions * probes *
+    # repeats extra partial episodes), like mc_value_study. Enabled by default here.
+    # within-episode step indices to snapshot at (steps elapsed so far in that episode) --
+    # evenly-spaced by default to cover the whole episode timeline, not just its start
+    intermediate_state_study_positions: [100, 300, 500, 700, 900]
+    # on-policy states captured per position, per eval epoch (also sets this env's
+    # num_envs -- one collection rollout produces exactly this many probes per position in a
+    # single pass, no waves needed for collection itself, only for scoring)
+    intermediate_state_study_probes: 17
+    # independent restore-and-rollout repeats averaged per probe state (same role, same n=10
+    # rationale, as mc_value_study_repeats above)
+    intermediate_state_study_repeats: 10
+  # logger configurations
+  logger_cfgs:
+    # use wandb for logging
+    use_wandb: True
+    # wandb project name
+    wandb_project: calibration_rl
+    # use tensorboard for logging
+    use_tensorboard: True
+    # save model frequency
+    save_model_freq: 100
+    # save logger path
+    log_dir: "./runs"
+    # save model path
+    window_lens: 100
+  # model configurations
+  model_cfgs:
+    # weight initialization mode
+    weight_initialization_mode: "kaiming_uniform"
+    # actor type, options: gaussian, gaussian_learning
+    actor_type: gaussian_learning
+    # linear learning rate decay
+    linear_lr_decay: True
+    # exploration noise anneal
+    exploration_noise_anneal: False
+    # std upper bound, and lower bound
+    std_range: [0.5, 0.1]
+    # embedding dimension
+    emb_dim: 8
+    # actor network configurations
+    actor:
+      # hidden layer sizes
+      hidden_sizes: [64, 64]
+      # activation function
+      activation: tanh
+      # out_activation: tanh
+      # learning rate
+      lr: ~
+    critic:
+      # hidden layer sizes
+      hidden_sizes: [64, 64]
+      # activation function
+      activation: tanh
+      # learning rate
+      lr: 0.001
+
+SafeMetaDrive:
+  # training configurations
+  train_cfgs:
+    # total number of steps to train
+    total_steps: 500000
+  # logger configurations
+  logger_cfgs:
+    # save model frequency
+    save_model_freq: 15
+  # algorithm configurations
+  algo_cfgs:
+    # batch size for each iteration
+    batch_size: 512
+    # number of steps to update the policy
+    steps_per_epoch: 3000
+    # number of iterations to update the policy
+    update_iters: 10
+    # normalize reward
+    reward_normalize: False
+    # normalize cost
+    cost_normalize: True
+    # normalize observation
+    obs_normalize: False
+    # max gradient norm
+    max_grad_norm: 20.0
+    cost_limit: 1
+  # model configurations
+  model_cfgs:
+    # actor network configurations
+    actor:
+      # size of hidden layers
+      hidden_sizes: [256, 256]
+      # learning rate
+      lr: 0.00005
+    # critic network configurations
+    critic:
+      # size of hidden layers
+      hidden_sizes: [256, 256]
+      # learning rate
+      lr: 0.00005
+  # environment specific configurations
+  # safe meta drive configurations. More details refer to https://github.com/decisionforce/EGPO
+    meta_drive_config:
+      # max iterations of interactions
+      horizon: 1500
+      # whether to use random traffic
+      random_traffic: False
+      # the penalty when crash into other vehicles
+      crash_vehicle_penalty: 1.
+      # the penalty when crash into other objects
+      crash_object_penalty: 0.5
+      # the penalty when out of road
+      out_of_road_penalty: 1.

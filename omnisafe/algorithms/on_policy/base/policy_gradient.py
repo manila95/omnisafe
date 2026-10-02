@@ -66,6 +66,12 @@ class PolicyGradient(BaseAlgo):
     _current_epoch: int = 0
     _pending_scatter_draw: tuple[int, torch.device] | None = None
     _sr_probe_fixed_drawn: bool = False
+    # Defaults for subclasses that override _init() and never set these (e.g. MICE).
+    _sr_td_ridge: bool = False
+    _sr_phi_source: str = 'random'
+    _sr_phi_trained: bool = False
+    _sr_phi_pretrain_steps: int = 0
+    _sr_phi_steps_per_epoch: int = 0
     # Dedicated eval envs, kept separate from self._env so training's own vectorization
     # (train_cfgs.vector_env_nums) is independent of the studies' parallelism, and so the
     # studies' ObsNormalize can be a frozen snapshot rather than drifting with their rollouts.
@@ -173,6 +179,7 @@ class PolicyGradient(BaseAlgo):
             sr_dim=sr_cfgs.sr_dim if self._sr_td_ridge else None,
             lam_sr=sr_cfgs.get('lam_sr', 0.95) if self._sr_td_ridge else 0.95,
             gamma_sr=sr_cfgs.get('gamma_sr', None) if self._sr_td_ridge else None,
+            cost_gamma=self._cfgs.algo_cfgs.get('cost_gamma', None),
         )
 
     def _init_log(self) -> None:

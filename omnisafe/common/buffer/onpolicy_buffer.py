@@ -97,6 +97,7 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
         sr_dim: int | None = None,
         lam_sr: float = 0.95,
         gamma_sr: float | None = None,
+        cost_gamma: float | None = None,
     ) -> None:
         """Initialize an instance of :class:`OnPolicyBuffer`."""
         super().__init__(obs_space, act_space, size, device)
@@ -111,6 +112,7 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
         self.data['value_c'] = torch.zeros((size,), dtype=torch.float32, device=device)
         self.data['target_value_c'] = torch.zeros((size,), dtype=torch.float32, device=device)
         self.data['logp'] = torch.zeros((size,), dtype=torch.float32, device=device)
+        self.data['discounted_cost_ret'] = torch.zeros((size,), dtype=torch.float32, device=device)
 
         # td_ridge successor representation: the vector-valued feature stream, trained with the
         # same estimator machinery as the scalar reward/cost streams. phi/psi are the one-step and
@@ -128,6 +130,7 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
         self._last_episode_slices: list[tuple[int, int]] = []
 
         self._gamma: float = gamma
+        self._cost_gamma: float = gamma if cost_gamma is None else cost_gamma
         self._lam: float = lam
         self._lam_c: float = lam_c
         self._penalty_coefficient: float = penalty_coefficient
@@ -209,6 +212,10 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
             self.data['reward'][path_slice],
             self._gamma,
         )
+        self.data['discounted_cost_ret'][path_slice] = discount_cumsum(
+            self.data['cost'][path_slice],
+            self._cost_gamma,
+        )
         rewards -= self._penalty_coefficient * costs
 
         adv_r, target_value_r = self._calculate_adv_and_value_targets(
@@ -220,6 +227,7 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
             values_c,
             costs,
             lam=self._lam_c,
+            gamma=self._cost_gamma,
         )
 
         self.data['adv_r'][path_slice] = adv_r
@@ -272,6 +280,7 @@ class OnPolicyBuffer(BaseBuffer):  # pylint: disable=too-many-instance-attribute
             'adv_r': self.data['adv_r'],
             'logp': self.data['logp'],
             'discounted_ret': self.data['discounted_ret'],
+            'discounted_cost_ret': self.data['discounted_cost_ret'],
             'adv_c': self.data['adv_c'],
             'target_value_c': self.data['target_value_c'],
         }
