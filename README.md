@@ -118,6 +118,3 @@ The MICE algorithm is taken from the code release of the original paper,
   booktitle = {Forty-second International Conference on Machine Learning}
 }
 ```
-
-See the notes in `docs/` for what was kept, what was left out, and where this
-implementation still differs from the original.
