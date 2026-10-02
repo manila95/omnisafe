@@ -1,0 +1,269 @@
+# Copyright 2023 OmniSafe Team. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+
+defaults:
+  # seed for random number generator
+  seed: 0
+  # training configurations
+  train_cfgs:
+    # device to use for training, options: cpu, cuda, cuda:0, cuda:0,1, etc.
+    device: cpu
+    # number of threads for torch
+    torch_threads: 4
+    # number of vectorized environments
+    vector_env_nums: 1
+    # number of parallel agent, similar to a3c
+    parallel: 1
+    # total number of steps to train
+    total_steps: 10000000
+  # algorithm configurations
+  algo_cfgs:
+    # --- critic value evaluation -----------------------------------------------------------
+    # Master switch for the Monte-Carlo critic-calibration studies: the same-layout s0 study and
+    # the on-policy intermediate-state study. The critic's training loss says how well it fits
+    # its own target; these say whether that target tracks the true discounted return.
+    #
+    # On by default. An eval epoch costs roughly an order of magnitude more than a training
+    # epoch (probes x repeats full episodes), so turn this off for speed-focused runs -- but
+    # note that doing so also changes the RNG stream, and therefore the training trajectory.
+    eval_critic: True
+    # Cadence. early_eval_freq applies below early_eval_epochs, value_eval_freq at or above it;
+    # the run's first evaluation is always epoch 1 (at epoch 0 the rollout comes from the
+    # freshly initialised policy and critics, so there is no trained update to look at).
+    early_eval_freq: 5
+    early_eval_epochs: 50
+    value_eval_freq: 50
+    # --- s0 study: fixed layouts, re-rolled to get a real MC estimate ----------------------
+    # Probe layouts are env reset seeds, held constant for the whole run so every eval epoch
+    # re-probes the same states.
+    mc_value_study_probes: 17
+    mc_value_study_repeats: 10
+    mc_value_study_seed_offset: 100000
+    # Probe rollouts run concurrently (subprocess-parallel vectorized env). Each probe still
+    # gets its own independent reset(seed=X); this only parallelizes across probes.
+    mc_value_study_vector_envs: 5
+    # --- intermediate-state study: states the policy actually visits mid-episode -----------
+    # Captured by simulator snapshot/restore, since reset(seed=X) cannot reach them. Note this
+    # env is built with num_envs = intermediate_state_study_probes, so its wall-clock is set by
+    # positions x repeats and is independent of the probe count.
+    intermediate_state_study_positions: [100, 300, 500, 700, 900]
+    intermediate_state_study_probes: 17
+    intermediate_state_study_repeats: 10
+    # --- rollout horizon -------------------------------------------------------------------
+    # Truncate a probe rollout once the discounted tail falls below this fraction. At gamma=0.99,
+    # 0.01 stops at step 459 of 1000 -- 2.18x fewer simulated steps.
+    mc_eval_bootstrap_threshold: 0.01
+    # What to do with that truncated tail. Required when the threshold is non-null; null makes a
+    # non-null threshold raise rather than silently biasing every value.
+    #   'drop'      -- stop accumulating. The value is the exact truncated discounted sum, low by
+    #                  at most the threshold of its own scale, one-sided and analytically known.
+    #                  Stays simulation-only, so a cost value is still non-negative and the
+    #                  critic never enters the "ground truth" it is being measured against.
+    #   'bootstrap' -- estimate the tail with the critic's own value there. Unbiased in
+    #                  principle, circular in practice.
+    mc_eval_tail: drop
+    # number of steps to update the policy
+    steps_per_epoch: 20000
+    # number of iterations to update the policy
+    update_iters: 10
+    # batch size for each iteration
+    batch_size: 128
+    # target kl divergence
+    target_kl: 0.01
+    # entropy coefficient
+    entropy_coef: 0.0
+    # normalize reward
+    reward_normalize: False
+    # normalize cost
+    cost_normalize: False
+    # normalize observation
+    obs_normalize: True
+    # early stop when kl divergence is bigger than target kl
+    kl_early_stop: False
+    # use max gradient norm
+    use_max_grad_norm: True
+    # max gradient norm
+    max_grad_norm: 40.0
+    # use critic norm
+    use_critic_norm: True
+    # critic norm coefficient
+    critic_norm_coef: 0.001
+    # reward discount factor
+    gamma: 0.99
+    # cost discount factor
+    cost_gamma: 0.99
+    # lambda for gae
+    lam: 0.95
+    # lambda for cost gae
+    lam_c: 0.95
+    # advantage estimation method, options: gae, retrace
+    adv_estimation_method: gae
+    # standardize reward advantage
+    standardized_rew_adv: True
+    # standardize cost advantage
+    standardized_cost_adv: True
+    # penalty coefficient
+    penalty_coef: 0.0
+    # use cost
+    use_cost: True
+    # Damping value for conjugate gradient
+    cg_damping: 0.1
+    # Number of conjugate gradient iterations
+    cg_iters: 15
+    # Subsampled observation
+    fvp_obs: None
+    # Tolerance of constraint violation
+    cost_limit: 25
+    # constant bias added to the episode cost CPO picks its optimization case on,
+    # decayed as cost_bias * cost_bias_decay_rate ** epoch
+    cost_bias: 5.0
+    cost_bias_decay_rate: 0.985
+    # The sub-sampling rate of the observation
+    fvp_sample_freq: 1
+  # logger configurations
+  logger_cfgs:
+    # use wandb for logging
+    use_wandb: True
+    # wandb project name
+    wandb_project: omnisafe
+    # use tensorboard for logging
+    use_tensorboard: True
+    # save model frequency
+    save_model_freq: 100
+    # save logger path
+    log_dir: "./runs"
+    # save model path
+    window_lens: 100
+  # model configurations
+  model_cfgs:
+    # whether the critics are read-outs of a shared successor-representation trunk
+    use_successor_representation: False
+    # successor-representation settings, used only when use_successor_representation is True.
+    # V(s) = psi(s) . w, with psi the discounted sum of a one-step feature stream phi and w the
+    # ridge solution of the immediate reward/cost onto phi.
+    sr_cfgs:
+      # only "td_ridge" is implemented here
+      sr_mode: td_ridge
+      # dimensionality of phi / psi
+      sr_dim: 64
+      # hidden sizes of the trunk psi is read from; empty makes the trunk an identity
+      hidden_sizes: [64, 64]
+      activation: tanh
+      # learning rate of the psi TD loss
+      lr: 0.0003
+      # lambda / discount of the psi lambda-target; gamma_sr null reuses algo_cfgs.gamma
+      lam_sr: 0.95
+      gamma_sr: ~
+      # ridge coefficient, scaling the Gram matrix's mean diagonal. ridge_kappa_cost null makes
+      # the cost read-out share ridge_kappa.
+      ridge_kappa: 0.001
+      ridge_kappa_cost: ~
+      # EMA blend of each ridge solve into the stored weights; 1.0 replaces outright
+      ema_tau: 1.0
+      # where phi comes from: "random" (a frozen linear projection) or "contrastive" (an MLP
+      # trained by the time-contrastive InfoNCE loss below)
+      phi_source: random
+      # hidden sizes of the standalone phi network ("contrastive" only)
+      phi_hidden_sizes: [64, 64]
+      # learning rate of the phi loss; null reuses lr
+      phi_lr: ~
+      # time-contrastive settings ("contrastive" only). Pretrain once at epoch 0, then adapt a
+      # little every epoch.
+      phi_contrastive_temperature: 0.1
+      phi_contrastive_horizon: 5
+      phi_contrastive_pretrain_steps: 500
+      phi_contrastive_steps_per_epoch: 50
+      phi_contrastive_batch_size: ~
+    # weight initialization mode
+    weight_initialization_mode: "kaiming_uniform"
+    # actor type, options: gaussian, gaussian_learning
+    actor_type: gaussian_learning
+    # linear learning rate decay
+    linear_lr_decay: True
+    # exploration noise anneal
+    exploration_noise_anneal: False
+    # std upper bound, and lower bound
+    std_range: [0.5, 0.1]
+    # actor network configurations
+    actor:
+      # hidden layer sizes
+      hidden_sizes: [64, 64]
+      # activation function
+      activation: tanh
+      # out_activation: tanh
+      # learning rate
+      lr: ~
+    critic:
+      # hidden layer sizes
+      hidden_sizes: [64, 64]
+      # activation function
+      activation: tanh
+      # learning rate
+      lr: 0.001
+
+SafeMetaDrive:
+  # training configurations
+  train_cfgs:
+    # total number of steps to train
+    total_steps: 500000
+  # logger configurations
+  logger_cfgs:
+    # save model frequency
+    save_model_freq: 15
+  # algorithm configurations
+  algo_cfgs:
+    # batch size for each iteration
+    batch_size: 512
+    # number of steps to update the policy
+    steps_per_epoch: 3000
+    # number of iterations to update the policy
+    update_iters: 10
+    # normalize reward
+    reward_normalize: False
+    # normalize cost
+    cost_normalize: True
+    # normalize observation
+    obs_normalize: False
+    # max gradient norm
+    max_grad_norm: 20.0
+    cost_limit: 1
+  # model configurations
+  model_cfgs:
+    # actor network configurations
+    actor:
+      # size of hidden layers
+      hidden_sizes: [256, 256]
+      # learning rate
+      lr: 0.00005
+    # critic network configurations
+    critic:
+      # size of hidden layers
+      hidden_sizes: [256, 256]
+      # learning rate
+      lr: 0.00005
+  # environment specific configurations
+  env_cfgs:
+  # safe meta drive configurations. More details refer to https://github.com/decisionforce/EGPO
+    meta_drive_config:
+      # max iterations of interactions
+      horizon: 1500
+      # whether to use random traffic
+      random_traffic: False
+      # the penalty when crash into other vehicles
+      crash_vehicle_penalty: 1.
+      # the penalty when crash into other objects
+      crash_object_penalty: 0.5
+      # the penalty when out of road
+      out_of_road_penalty: 1.

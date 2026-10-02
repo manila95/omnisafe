@@ -336,6 +336,10 @@ class CPO(TRPO):
 
         return step_direction, lambda_star, nu_star
 
+    def _ep_costs(self) -> float:
+        """Episode cost relative to the limit, the quantity the optimization case is chosen on."""
+        return self._logger.get_stats('Metrics/EpCost')[0] - self._cfgs.algo_cfgs.cost_limit
+
     # pylint: disable=invalid-name,too-many-arguments,too-many-locals
     def _update_actor(
         self,
@@ -388,7 +392,7 @@ class CPO(TRPO):
         distributed.avg_grads(self._actor_critic.actor)
 
         b_grads = get_flat_gradients_from(self._actor_critic.actor)
-        ep_costs = self._logger.get_stats('Metrics/EpCost')[0] - self._cfgs.algo_cfgs.cost_limit
+        ep_costs = self._ep_costs()
 
         p = conjugate_gradients(self._fvp, b_grads, self._cfgs.algo_cfgs.cg_iters)
         q = xHx
