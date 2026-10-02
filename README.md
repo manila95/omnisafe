@@ -366,6 +366,114 @@ omnisafe train-config ./tests/saved_source/train_config.yaml
 
 --------------------------------------------------------------------------------
 
+## Critic Calibration: Evaluation and Algorithms
+
+This fork adds a Monte-Carlo **value-evaluation** harness and three algorithms that
+build on CPO. Design notes and parity results live in `docs/`:
+[`value_eval_port.md`](docs/value_eval_port.md),
+[`sr_critic_port.md`](docs/sr_critic_port.md),
+[`mice_and_biased_cost_port.md`](docs/mice_and_biased_cost_port.md).
+
+All commands below are run from `examples/`. Pass `--torch-threads` explicitly: the
+script's default (16) overrides the value in the config, and the thread count
+changes float reductions enough to shift results run to run.
+
+### 1. Value evaluation (CPO, PID-Lagrangian)
+
+Scores a critic against a Monte-Carlo estimate of the value it should predict, by
+re-rolling the same states many times and averaging the realised discounted return.
+Two studies run on each eval epoch, before the update, so the critic measured is the
+one that produced that epoch's advantages:
+
+- **start states** — `reset(seed=X)` reproduces a layout exactly, so each probe seed
+  gives a fixed `s0` that can be rolled out `mc_value_study_repeats` times;
+- **on-policy intermediate states** — snapshots the simulator part-way through a
+  rollout and re-rolls from there, measuring the critic where the policy actually is.
+
+Both feed one pooled block under `ValueEval/` (estimation error, Pearson, Spearman,
+AUROC and its finite-sample ceiling), and every raw array is written to
+`eval_data/epoch_*.pkl` so anything not computed online can be derived later.
+
+`eval_critic` is **on by default**. It is expensive — roughly an order of magnitude
+more than a training epoch — so it runs on a cadence (`early_eval_freq` for the first
+`early_eval_epochs`, then `value_eval_freq`).
+
+```bash
+python train_policy.py --algo CPO     --env-id SafetyPointGoal1-v0 --total-steps 10000000 --device cpu --vector-env-nums 1 --torch-threads 4
+python train_policy.py --algo TRPOPID --env-id SafetyPointGoal1-v0 --total-steps 10000000 --device cpu --vector-env-nums 1 --torch-threads 4
+```
+
+To turn evaluation off, or change its cadence (any config key can be overridden
+as `--section:key value`, nesting with `:`):
+
+```bash
+python train_policy.py --algo CPO --env-id SafetyPointGoal1-v0 --total-steps 10000000 --device cpu --vector-env-nums 1 --torch-threads 4 \
+    --algo_cfgs:eval_critic False --algo_cfgs:value_eval_freq 100
+```
+
+### 2. MICE
+
+CPO plus an intrinsic cost that penalises proximity to states where cost was
+previously incurred. A per-environment *flashbulb memory* stores a random projection
+of every state whose cost was positive; each step is scored against it by a k-NN
+kernel density, scaled by `intrinsic_factor * cost_gamma ** epoch`, and added to the
+cost advantage with a coefficient adapted online from the cost TD residual. The
+epoch-wise decay retires the intrinsic term, so MICE converges toward plain CPO.
+
+Key settings: `intrinsic_factor` (5.0), `k_knn` (10), `buf_maxlen` (100 per env),
+`model_cfgs.emb_dim` (8).
+
+```bash
+python train_policy.py --algo MICE --env-id SafetyPointGoal1-v0 --total-steps 10000000 --device cpu --vector-env-nums 1 --torch-threads 16
+```
+
+### 3. BC-CPO (biased cost)
+
+The much simpler counterpart: a flat constant added to the episode cost that CPO
+picks its optimization case on, decaying as `cost_bias * cost_bias_decay_rate ** epoch`.
+Early updates behave as if the policy were more costly than measured; the bias
+vanishes and BC-CPO becomes plain CPO. `cost_bias: 0` reproduces CPO exactly.
+
+Note the bias only bites near the constraint boundary. Far into violation, CPO takes
+a recovery step that ignores the *magnitude* of the cost, so the bias changes nothing
+— and the shipped `cost_bias: 5.0` is a placeholder, not a tuned value.
+
+```bash
+python train_policy.py --algo BCCPO --env-id SafetyPointGoal1-v0 --total-steps 10000000 --device cpu --vector-env-nums 1 --torch-threads 16 \
+    --algo_cfgs:cost_bias 5.0 --algo_cfgs:cost_bias_decay_rate 0.985
+```
+
+### 4. Successor-representation critic
+
+Replaces both critics with read-outs of one shared trunk, factorizing the value as
+`V(s) = psi(s) . w`: `psi` is the discounted sum of a one-step feature stream `phi`,
+trained against its own TD target, and `w` is the closed-form ridge solution of the
+immediate reward (or cost) onto `phi`, re-solved once per epoch.
+
+`phi_source` selects the feature map:
+
+- **`random`** — a frozen random linear projection. Frozen is the point: `psi` is
+  *defined* as the discounted sum of `phi`, so a moving `phi` leaves `psi` chasing a
+  map that no longer exists.
+- **`contrastive`** — an MLP trained by a time-contrastive InfoNCE loss, pulling
+  together states visited close in time within an episode and pushing apart distant
+  ones. Pretrained at epoch 0, then adapted each epoch, with the affected tensors
+  relabelled after `phi` moves.
+
+It is off by default; enable it on any on-policy algorithm.
+
+```bash
+python train_policy.py --algo CPO --env-id SafetyPointGoal1-v0 --total-steps 10000000 --device cpu --vector-env-nums 1 --torch-threads 4 \
+    --model_cfgs:use_successor_representation True \
+    --model_cfgs:sr_cfgs:phi_source contrastive
+```
+
+Swap `contrastive` for `random` to use the frozen projection. Relevant settings live
+under `model_cfgs.sr_cfgs`: `sr_dim` (64), `ridge_kappa` (1e-3), `lam_sr` (0.95), and
+the `phi_contrastive_*` group.
+
+--------------------------------------------------------------------------------
+
 ## Getting Started
 
 ### Important Hints
