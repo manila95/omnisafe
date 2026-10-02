@@ -108,7 +108,16 @@ infrastructure everything here is built on.
 }
 ```
 
-The value-evaluation harness, the successor-representation critic, MICE and BC-CPO
-are adapted from the research code in [**MICE**](https://github.com/manila95/MICE),
-and are intended to reproduce its results — see the notes in `docs/` for what was
-kept, what was left out, and where the two still differ.
+The MICE algorithm is taken from the code release of the original paper,
+[ShiqingGao/MICE](https://github.com/ShiqingGao/MICE):
+
+```bibtex
+@inproceedings{gaocontrolling,
+  title     = {Controlling Underestimation Bias in Constrained Reinforcement Learning for Safe Exploration},
+  author    = {Gao, Shiqing and Ding, Jiaxin and Fu, Luoyi and Wang, Xinbing},
+  booktitle = {Forty-second International Conference on Machine Learning}
+}
+```
+
+See the notes in `docs/` for what was kept, what was left out, and where this
+implementation still differs from the original.
