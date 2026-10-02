@@ -81,7 +81,7 @@ defaults:
     # Subsampled observation
     fvp_obs: None
     # Tolerance of constraint violation
-    cost_limit: 25
+    cost_limit: 10
     eval_critic: True
     # Cadence. early_eval_freq applies below early_eval_epochs, value_eval_freq at or above it;
     # the run's first evaluation is always epoch 1 (at epoch 0 the rollout comes from the
@@ -166,7 +166,7 @@ defaults:
       lr: ~
     critic:
       # hidden layer sizes
-      hidden_sizes: [64, 64]
+      hidden_sizes: [256, 256]
       # activation function
       activation: tanh
       # learning rate

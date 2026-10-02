@@ -160,9 +160,9 @@ defaults:
       # only "td_ridge" is implemented here
       sr_mode: td_ridge
       # dimensionality of phi / psi
-      sr_dim: 64
+      sr_dim: 256
       # hidden sizes of the trunk psi is read from; empty makes the trunk an identity
-      hidden_sizes: [64, 64]
+      hidden_sizes: [256, 256]
       activation: tanh
       # learning rate of the psi TD loss
       lr: 0.0003
@@ -210,7 +210,7 @@ defaults:
       lr: ~
     critic:
       # hidden layer sizes
-      hidden_sizes: [64, 64]
+      hidden_sizes: [256, 256]
       # activation function
       activation: tanh
       # learning rate
