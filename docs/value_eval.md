@@ -1,8 +1,4 @@
-# Monte-Carlo value evaluation — port notes
-
-Ported from the MICE branch `mc-eval-no-bootstrap` onto `code-release`.
-Commits `c1d4b50` (add), `ac2f6c2` (compact), `817744b` (factor), `e64316b`
-(parity), `4dae7c8` (defaults + progress bar).
+# Monte-Carlo value evaluation 
 
 ## What it does
 
@@ -64,11 +60,6 @@ is *dropped* rather than estimated. The resulting bias is known and bounded —
 each value is short by at most the threshold's share of its own scale — rather
 than contaminated by the critic.
 
-The same reasoning applies to the buffer's `discounted_ret`, which upstream
-built by appending the bootstrap as a pseudo-final reward (fixed in `e64316b`).
-That is correct for the advantage/target estimators and wrong for the quantity
-`Value/Train/*_true_r` scores the critic against.
-
 ## Files
 
 | file | role |
@@ -82,9 +73,6 @@ That is correct for the advantage/target estimators and wrong for the quantity
 Plus `_run_eval_studies` / `_log_train_critic_diagnostics` in `policy_gradient`,
 `Normalizer.normalize(update=)` and `ObsNormalize(update_stats=)`.
 
-Both studies share one rollout loop (`_roll_probes`); they differ only in a
-`begin_wave` callback that puts the env into each wave's start states. The three
-commits after the initial add cut the eval code roughly in half.
 
 ## Config
 
@@ -104,18 +92,6 @@ mc_eval_tail: drop
 The first evaluation is always epoch 1, never epoch 0: at epoch 0 the rollout
 comes from the freshly initialised policy and critics, so there is no trained
 update to look at.
-
-`mc_value_study_repeats: 10` rather than 5 — a split-half reliability study
-found n=5 badly under-samples **cost** specifically; paired with the 0.01
-truncation threshold, n=10 costs about the same wall-clock as the old n=5 did.
-
-## Cost
-
-Evaluation dominates an eval epoch's wall-clock (roughly an order of magnitude
-more than a training epoch: `probes x repeats` full episodes, plus the same
-again per intermediate position). It is latency-bound rather than core-bound —
-8 cores measured only ~10% worse than 32 for sequential eval. Hence the cadence
-knobs, and `transient=False` progress bar added in `4dae7c8`.
 
 ## Reproducibility
 
@@ -137,24 +113,3 @@ ran**, because the eval path consumes RNG. The fix is RNG save/restore around
 eval (the `eval_rng` approach on MICE's `decouple-eval` branch), which would
 also make eval-on and eval-off runs comparable within a repo.
 
-## Parity
-
-CPO / `SafetyPointGoal1-v0` / seed 0, default config, no overrides:
-
-```
-CPO      (torch_threads 4)   10 epochs   training identical   10004/10004 eval arrays
-TRPOPID  (torch_threads 4)    6 epochs   training identical   10004/10004 eval arrays
-PPOLag   (torch_threads 16)   6 epochs   training identical   10004/10004 eval arrays
-control: eval_critic=False   10 epochs   training identical (isolates eval RNG as the only delta)
-```
-
-## Not done
-
-- `discounted_cost_ret` is absent from the buffer, so there is no
-  `Value/Train/Correlation_true_c` to match `Value/Train/Correlation_true_r`.
-- The `early_eval_epochs: 50` cadence switch is untested — the longest parity
-  run was 10 epochs, so `early_eval_freq` -> `value_eval_freq` never fired.
-- `ppo_simmer_pid` / `trpo_simmer_pid` define their own `_update` with no
-  `super()` call, so `_consume_scatter_rng` never runs for them. Neither repo
-  draws there, so parity should hold, but it is unverified and
-  `_pending_scatter_draw` is left set.

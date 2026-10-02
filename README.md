@@ -370,9 +370,9 @@ omnisafe train-config ./tests/saved_source/train_config.yaml
 
 This fork adds a Monte-Carlo **value-evaluation** harness and three algorithms that
 build on CPO. Design notes and parity results live in `docs/`:
-[`value_eval_port.md`](docs/value_eval_port.md),
-[`sr_critic_port.md`](docs/sr_critic_port.md),
-[`mice_and_biased_cost_port.md`](docs/mice_and_biased_cost_port.md).
+[`value_eval.md`](docs/value_eval.md),
+[`sr_critic.md`](docs/sr_critic.md),
+[`mice_and_biased_cost.md`](docs/mice_and_biased_cost.md).
 
 All commands below are run from `examples/`. Pass `--torch-threads` explicitly: the
 script's default (16) overrides the value in the config, and the thread count
