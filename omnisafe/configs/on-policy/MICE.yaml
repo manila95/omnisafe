@@ -269,7 +269,7 @@ defaults:
     # use wandb for logging
     use_wandb: True
     # wandb project name
-    wandb_project: calibration_rl
+    wandb_project: omnisafe
     # use tensorboard for logging
     use_tensorboard: True
     # save model frequency
