@@ -65,6 +65,8 @@ defaults:
     # lambda for cost gae
     lam_c: 0.95
     # advantage estimation method, options: gae, retrace
+    # MICE\'s intrinsic-cost advantage is only implemented for gae; see
+    # mice_buffer._calculate_balancing_intrinsic_adv_and_value_targets.
     adv_estimation_method: gae
     # standardize reward advantage
     standardized_rew_adv: True
