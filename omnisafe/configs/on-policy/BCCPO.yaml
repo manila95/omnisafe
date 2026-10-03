@@ -109,7 +109,7 @@ defaults:
     # lambda for cost gae
     lam_c: 0.95
     # advantage estimation method, options: gae, retrace
-    adv_estimation_method: plain
+    adv_estimation_method: gae
     # standardize reward advantage
     standardized_rew_adv: True
     # standardize cost advantage

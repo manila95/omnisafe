@@ -93,23 +93,3 @@ The first evaluation is always epoch 1, never epoch 0: at epoch 0 the rollout
 comes from the freshly initialised policy and critics, so there is no trained
 update to look at.
 
-## Reproducibility
-
-Two things must hold to reproduce MICE:
-
-1. **`torch_threads` must match.** The thread count changes GEMM row-blocking,
-   so the tail row of an eval wave rounds one float32 ULP differently and the
-   chaotic rollout amplifies it. MICE uses 4 for CPO/TRPOPID, 16 elsewhere;
-   these configs now match per algorithm.
-2. **`_consume_scatter_rng`.** MICE's eval diagnostics draw a `randperm` to
-   subsample points for scatter plots that are not reproduced here. The draw
-   still has to happen: it lands at the end of `_update`, after the critic
-   loop's `DataLoader(shuffle=True)` seeds, so skipping it reshuffles every
-   minibatch from the first eval epoch onward. The eval itself stays identical
-   while training diverges one epoch later — recognise that signature.
-
-Note the corollary: with eval on, **training results depend on whether eval
-ran**, because the eval path consumes RNG. The fix is RNG save/restore around
-eval (the `eval_rng` approach on MICE's `decouple-eval` branch), which would
-also make eval-on and eval-off runs comparable within a repo.
-

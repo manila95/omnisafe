@@ -63,8 +63,3 @@ Modified: `onpolicy_buffer` / `vector_onpolicy_buffer` (the `phi`/`psi`/`target_
 fields, `last_psi`, episode boundaries), `onpolicy_adapter` (feature capture during
 rollout), `constraint_actor_critic` (trunk, read-outs, optimizers), and `_update` in
 `policy_gradient` / `natural_pg` / `focops`.
-
-
-`torch_threads` must also match between the two repos: the thread count changes
-GEMM row-blocking, which moves the tail row of an eval batch by one float32 ULP,
-and the chaotic rollout amplifies it.
