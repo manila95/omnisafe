@@ -20,6 +20,27 @@ import omnisafe
 from omnisafe.utils.tools import custom_cfgs_to_dict, update_dict
 
 
+
+def _parse_overrides(tokens: list[str]) -> dict[str, str]:
+    """Config overrides from leftover CLI tokens, in either "--key value" or "--key=value"."""
+    out: dict[str, str] = {}
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if not tok.startswith('--'):
+            raise ValueError(f'unexpected argument {tok!r}; expected --key value or --key=value')
+        if '=' in tok:
+            key, value = tok[2:].split('=', 1)
+            i += 1
+        else:
+            if i + 1 >= len(tokens):
+                raise ValueError(f'missing value for {tok!r}')
+            key, value = tok[2:], tokens[i + 1]
+            i += 2
+        out[key] = value
+    return out
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
@@ -73,9 +94,9 @@ if __name__ == '__main__':
         help='number of threads to use for torch',
     )
     args, unparsed_args = parser.parse_known_args()
-    keys = [k[2:] for k in unparsed_args[0::2]]
-    values = list(unparsed_args[1::2])
-    unparsed_args = dict(zip(keys, values))
+    # Accept both "--key value" and "--key=value"; wandb sweeps pass the latter. Keys may
+    # separate levels with ':' or '.' (algo-cfgs:lam-c or algo-cfgs.lam-c).
+    unparsed_args = _parse_overrides(unparsed_args)
 
     custom_cfgs = {}
     for k, v in unparsed_args.items():

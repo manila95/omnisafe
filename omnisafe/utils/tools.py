@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import random
 import sys
 from typing import Any
@@ -182,7 +183,9 @@ def custom_cfgs_to_dict(key_list: str, value: Any) -> dict[str, Any]:
         value = value.split(',')
     else:
         value = str(value)
-    keys_split = key_list.replace('-', '_').split(':')
+    # Levels may be separated by ':' or '.'; the dotted form is what a wandb sweep
+    # writes, e.g. algo_cfgs.lam_c.
+    keys_split = re.split(r'[:.]', key_list.replace('-', '_'))
     return_dict = {keys_split[-1]: value}
 
     for key in reversed(keys_split[:-1]):
