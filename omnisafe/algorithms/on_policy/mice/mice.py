@@ -92,6 +92,8 @@ class MICE(CPO):
             # After the rollout and before _update(), so the critic evaluated is the one that
             # produced this epoch's advantages. Replaces MICE's own test_estimate hook.
             self._run_eval_studies(epoch)
+            self._total_cost += self._env._epoch_cost_sum
+            self._logger.store({'Metrics/TotalCost': self._total_cost})
 
             self._logger.store({'Time/Rollout': time.time() - rollout_time})
 

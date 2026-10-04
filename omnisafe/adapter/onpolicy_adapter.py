@@ -90,6 +90,7 @@ class OnPolicyAdapter(OnlineAdapter):
             logger (Logger): Logger, to log ``EpRet``, ``EpCost``, ``EpLen``.
         """
         self._reset_log()
+        self._epoch_cost_sum = 0.0
 
         obs, _ = self.reset()
         for step in track(

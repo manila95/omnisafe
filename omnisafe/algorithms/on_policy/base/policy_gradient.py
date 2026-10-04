@@ -66,6 +66,8 @@ class PolicyGradient(BaseAlgo):
     _current_epoch: int = 0
     _pending_scatter_draw: tuple[int, torch.device] | None = None
     _sr_probe_fixed_drawn: bool = False
+    # Raw cost summed over every epoch so far; logged as Metrics/TotalCost.
+    _total_cost: float = 0.0
     # Defaults for subclasses that override _init() and never set these (e.g. MICE).
     _sr_td_ridge: bool = False
     _sr_phi_source: str = 'random'
@@ -252,6 +254,8 @@ class PolicyGradient(BaseAlgo):
             'Metrics/EpLen',
             window_length=self._cfgs.logger_cfgs.window_lens,
         )
+        # Raw cost accumulated over the whole run, not windowed, as MICE logs it.
+        self._logger.register_key('Metrics/TotalCost')
 
         self._logger.register_key('Train/Epoch')
         self._logger.register_key('Train/Entropy')
@@ -596,6 +600,8 @@ class PolicyGradient(BaseAlgo):
             # before _update() (so the critic evaluated is the one that computed this epoch's
             # advantages, not the one that has already been fitted to them).
             self._run_eval_studies(epoch)
+            self._total_cost += self._env._epoch_cost_sum  # noqa: SLF001
+            self._logger.store({'Metrics/TotalCost': self._total_cost})
             self._logger.store({'Time/Rollout': time.time() - rollout_time})
 
             update_time = time.time()
