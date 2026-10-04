@@ -155,6 +155,29 @@ def seed_all(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+def _parse_scalar(value: Any) -> Any:
+    """One CLI token to a bool, int, float or str.
+
+    The list case is handled by the caller; this only ever sees a single element, so a
+    bracketed value never reaches the numeric branches.
+    """
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if text == 'True':
+        return True
+    if text == 'False':
+        return False
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+
 def custom_cfgs_to_dict(key_list: str, value: Any) -> dict[str, Any]:
     """This function is used to convert the custom configurations to dict.
 
@@ -170,19 +193,9 @@ def custom_cfgs_to_dict(key_list: str, value: Any) -> dict[str, Any]:
     Returns:
         The converted dict.
     """
-    if value == 'True':
-        value = True
-    elif value == 'False':
-        value = False
-    elif '.' in value:
-        value = float(value)
-    elif value.isdigit():
-        value = int(value)
-    elif value.startswith('[') and value.endswith(']'):
-        value = value[1:-1]
-        value = value.split(',')
-    else:
-        value = str(value)
+    value = _parse_scalar(value) if not isinstance(value, str) or not (
+        value.strip().startswith('[') and value.strip().endswith(']')
+    ) else [_parse_scalar(v) for v in value.strip()[1:-1].split(',') if v.strip()]
     # Levels may be separated by ':' or '.'; the dotted form is what a wandb sweep
     # writes, e.g. algo_cfgs.lam_c.
     keys_split = re.split(r'[:.]', key_list.replace('-', '_'))
