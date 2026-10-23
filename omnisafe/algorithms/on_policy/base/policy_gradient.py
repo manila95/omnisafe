@@ -43,6 +43,7 @@ from omnisafe.utils.state_snapshot import collect_on_policy_snapshots, enable_st
 from omnisafe.utils.value_eval import (
     estimate_true_value_same_state_mc,
     estimate_value_from_snapshots,
+    resolve_study_positions,
 )
 from omnisafe.utils.value_utils import pool_correlation_stats, sync_obs_normalizer
 
@@ -498,18 +499,37 @@ class PolicyGradient(BaseAlgo):
                 getattr(
                     self._cfgs.algo_cfgs,
                     'intermediate_state_study_positions',
-                    [100, 300, 500, 700, 900],
+                    [0.1, 0.3, 0.5, 0.7, 0.9],
                 ),
             )
             n_probes = int(getattr(self._cfgs.algo_cfgs, 'intermediate_state_study_probes', 20))
             repeats = int(getattr(self._cfgs.algo_cfgs, 'intermediate_state_study_repeats', 5))
             interm_env = self._get_intermediate_state_env()
             sync_obs_normalizer(interm_env, self._env._env)
+            max_eps = self._mc_intermediate_max_episode_steps
+            configured = positions
+            positions, dropped = resolve_study_positions(configured, max_eps)
+            if not positions:
+                raise ValueError(
+                    f'intermediate_state_study_positions {configured} resolved to nothing for '
+                    f"this env's {max_eps}-step episode limit -- no state to study.",
+                )
+            if dropped:
+                self._logger.log(
+                    f'INFO: intermediate-state study skipping positions {dropped} (unreachable '
+                    f"within this env's {max_eps}-step episode limit); using {positions}.",
+                )
+                if progress is not None and task_id is not None:
+                    progress.update(
+                        task_id,
+                        total=int(getattr(self._cfgs.algo_cfgs, 'mc_value_study_probes', 100))
+                        * int(getattr(self._cfgs.algo_cfgs, 'mc_value_study_repeats', 5))
+                        + len(positions) * n_probes * repeats,
+                    )
             base_seed = 700_000 + epoch * n_probes
             collected = collect_on_policy_snapshots(
                 self._actor_critic, interm_env, positions, base_seed=base_seed,
             )
-            max_eps = self._mc_intermediate_max_episode_steps
             eval_data_bundle['intermediate_study'] = {}
             for pos in positions:
                 pos_stats, pos_raw = estimate_value_from_snapshots(

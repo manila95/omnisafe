@@ -15,8 +15,12 @@ episode starts.
 
 **On-policy intermediate study** (`estimate_value_from_snapshots`). Episode
 starts are not where a policy spends its time. This snapshots the simulator at
-`intermediate_state_study_positions` steps into an on-policy rollout, then
-restores and re-rolls from each snapshot. Measures the critic where the current
+`intermediate_state_study_positions` into an on-policy rollout, then restores
+and re-rolls from each snapshot. Entries are proportions of the episode, so one
+config transfers across envs with different horizons: `0.3` is three-tenths of
+the way in whether that is Goal's 1000 steps or Circle's 500. An entry `>= 1` is
+instead read as an absolute step index, for explicit one-off overrides; any that
+the episode never reaches is dropped with a logged note. Measures the critic where the current
 policy actually is.
 
 Both feed one pooled block logged under `ValueEval/`. Per-study breakdowns and
@@ -84,7 +88,7 @@ value_eval_freq: 50            # cadence at or above it
 mc_value_study_probes: 17
 mc_value_study_repeats: 10
 mc_value_study_vector_envs: 5  # parallelism, independent of train vector_env_nums
-intermediate_state_study_positions: [100, 300, 500, 700, 900]
+intermediate_state_study_positions: [0.1, 0.3, 0.5, 0.7, 0.9]  # fractions of the episode
 mc_eval_bootstrap_threshold: 0.01
 mc_eval_tail: drop
 ```

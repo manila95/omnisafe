@@ -336,6 +336,51 @@ def estimate_true_value_same_state_mc(
     return result
 
 
+def resolve_study_positions(
+    positions: list[float | int],
+    max_episode_steps: int | None,
+) -> tuple[list[int], list[float | int]]:
+    """Resolve configured intermediate-state study positions to absolute step indices.
+
+    Each entry is either a *proportion* of the episode (``0 < p < 1``, the form the shipped
+    configs use) or an absolute step index (``>= 1``). Proportions are what make one config
+    work across envs with different horizons: ``0.3`` is three-tenths of the way in whether
+    the episode is Goal's 1000 steps or Circle's 500. The shipped
+    ``[0.1, 0.3, 0.5, 0.7, 0.9]`` resolves to exactly the ``[100, 300, 500, 700, 900]`` that
+    was previously hard-coded, so 1000-step envs are unaffected.
+
+    Absolute entries are kept for explicit one-off overrides. Any that fall at or past the
+    episode limit are unreachable, so they are dropped (reported in the second return value)
+    rather than left to fail during collection. Proportions can never land there.
+
+    Args:
+        positions: Configured entries, proportions and/or absolute step indices.
+        max_episode_steps: The env's episode limit; ``None`` leaves absolute entries as-is
+        and makes proportions unresolvable (they are dropped).
+
+    Returns:
+        ``(resolved, dropped)`` -- the usable absolute step indices, sorted and deduplicated,
+        and the configured entries that could not be used.
+    """
+    resolved: list[int] = []
+    dropped: list[float | int] = []
+    for entry in positions:
+        if 0 < entry < 1:
+            if max_episode_steps is None:
+                dropped.append(entry)
+                continue
+            step = int(round(entry * max_episode_steps))
+            resolved.append(min(max(step, 1), max_episode_steps - 1))
+        elif entry >= 1:
+            if max_episode_steps is not None and entry >= max_episode_steps:
+                dropped.append(entry)
+                continue
+            resolved.append(int(entry))
+        else:
+            dropped.append(entry)
+    return sorted(set(resolved)), dropped
+
+
 def estimate_value_from_snapshots(
     agent,
     env,

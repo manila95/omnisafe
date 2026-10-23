@@ -40,9 +40,11 @@ construction:
   unconditionally for hazards/vase/etc. too rather than assuming which ones currently are, since
   getting this wrong silently produces a wrong-but-plausible-looking restored layout instead of
   an error).
-- ``task.last_dist_goal`` -- reward-shaping state specific to the Goal task family this codebase
-  actually uses (SafetyPointGoal1-v0); a genuinely general version would need a per-task-type
-  hook here, out of scope for the one env this module is used with.
+- per-step reward-shaping state that only some task families define -- ``task.last_dist_goal``
+  (Goal/Button/Push) and ``task.old_potential`` (Run); see ``_TASK_REWARD_STATE_FIELDS``. Each is
+  captured and restored only where the task actually defines it, so a family that lacks one just
+  has no such key in its snapshot and the families that do have it are unaffected. Circle defines
+  neither and needs none.
 - ``task.random_generator.random_generator.get_state()`` -- the task's own RNG state, so any
   future stochastic event during the *scored* rollout (e.g. a goal respawn) replays with the same
   quality of randomness as a real trajectory would have had, not a freshly-reseeded stream.
@@ -184,6 +186,12 @@ def configure_snapshot_triggers(env, trigger_steps: set[int] | None) -> None:
         target.set_snapshot_trigger_steps(trigger_steps)
 
 
+#: Per-step reward-shaping state, each defined only by some task families: ``last_dist_goal`` by
+#: Goal/Button/Push, ``old_potential`` by Run. Circle defines neither. Captured/restored only
+#: where present, so a task that lacks one is unaffected by its being listed here.
+_TASK_REWARD_STATE_FIELDS = ('last_dist_goal', 'old_potential')
+
+
 def snapshot_builder(builder: Builder) -> dict:
     """Capture everything needed to exactly restore ``builder``'s current state.
 
@@ -193,7 +201,7 @@ def snapshot_builder(builder: Builder) -> dict:
     """
     data = builder.task.data
     model = builder.task.model
-    return {
+    snapshot = {
         'qpos': data.qpos.copy(),
         'qvel': data.qvel.copy(),
         'time': float(data.time),
@@ -201,12 +209,15 @@ def snapshot_builder(builder: Builder) -> dict:
         'ctrl': data.ctrl.copy(),
         'body_pos': model.body_pos.copy(),
         'body_quat': model.body_quat.copy(),
-        'last_dist_goal': builder.task.last_dist_goal,
         'rng_state': builder.task.random_generator.random_generator.get_state(),
         'steps': builder.steps,
         'terminated': builder.terminated,
         'truncated': builder.truncated,
     }
+    for field in _TASK_REWARD_STATE_FIELDS:
+        if hasattr(builder.task, field):
+            snapshot[field] = getattr(builder.task, field)
+    return snapshot
 
 
 def restore_builder(builder: Builder, snapshot: dict) -> None:
@@ -225,7 +236,9 @@ def restore_builder(builder: Builder, snapshot: dict) -> None:
     model.body_pos[:] = snapshot['body_pos']
     model.body_quat[:] = snapshot['body_quat']
     mujoco.mj_forward(model, data)
-    builder.task.last_dist_goal = snapshot['last_dist_goal']
+    for field in _TASK_REWARD_STATE_FIELDS:
+        if field in snapshot:
+            setattr(builder.task, field, snapshot[field])
     builder.task.random_generator.random_generator.set_state(snapshot['rng_state'])
     builder.steps = snapshot['steps']
     builder.terminated = snapshot['terminated']

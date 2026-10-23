@@ -58,7 +58,7 @@ defaults:
     # Captured by simulator snapshot/restore, since reset(seed=X) cannot reach them. Note this
     # env is built with num_envs = intermediate_state_study_probes, so its wall-clock is set by
     # positions x repeats and is independent of the probe count.
-    intermediate_state_study_positions: [100, 300, 500, 700, 900]
+    intermediate_state_study_positions: [0.1, 0.3, 0.5, 0.7, 0.9]
     intermediate_state_study_probes: 17
     intermediate_state_study_repeats: 10
     # --- rollout horizon -------------------------------------------------------------------
