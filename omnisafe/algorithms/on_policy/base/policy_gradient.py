@@ -40,12 +40,17 @@ from omnisafe.models.critic.successor_representation_critic import (
 from omnisafe.utils import contrastive, distributed
 from omnisafe.utils.eval_data_dump import log_eval_data_to_wandb, save_eval_data
 from omnisafe.utils.state_snapshot import collect_on_policy_snapshots, enable_state_snapshots
+from omnisafe.utils.isolated_eval import env_needs_isolated_eval, run_isolated_value_studies
 from omnisafe.utils.value_eval import (
     estimate_true_value_same_state_mc,
     estimate_value_from_snapshots,
     resolve_study_positions,
 )
-from omnisafe.utils.value_utils import pool_correlation_stats, sync_obs_normalizer
+from omnisafe.utils.value_utils import (
+    find_obs_normalizer,
+    pool_correlation_stats,
+    sync_obs_normalizer,
+)
 
 
 @registry.register
@@ -82,6 +87,7 @@ class PolicyGradient(BaseAlgo):
     _mc_eval_max_episode_steps: int | None = None
     _mc_intermediate_env: Any = None
     _mc_intermediate_max_episode_steps: int | None = None
+    _isolated_eval: bool | None = None
 
     def _init_env(self) -> None:
         """Initialize the environment.
@@ -438,6 +444,83 @@ class PolicyGradient(BaseAlgo):
         self._pending_scatter_draw = None
         torch.randperm(n, device=device)
 
+    @property
+    def _use_isolated_eval(self) -> bool:
+        """Whether this env's value studies must run in their own process.
+
+        True only for environments that declare they cannot host a second env instance
+        (MetaDrive's global engine); every other env keeps the in-process study path
+        untouched. See :mod:`omnisafe.utils.isolated_eval`.
+        """
+        if self._isolated_eval is None:
+            self._isolated_eval = env_needs_isolated_eval(self._env_id)
+        return self._isolated_eval
+
+    def _run_isolated_eval_studies(self, epoch: int, eval_data_bundle: dict) -> None:
+        """Run both value studies in a subprocess and file the results as the in-process path does.
+
+        Used only for environments that cannot host a second env instance in this process (see
+        :attr:`_use_isolated_eval`). Results land in ``eval_data_bundle`` in exactly the shape the
+        in-process studies produce, so the pooling, logging and dump code downstream needs no
+        knowledge of which path produced them.
+        """
+        if self._mc_probe_seeds is None:
+            n_probes = int(getattr(self._cfgs.algo_cfgs, 'mc_value_study_probes', 100))
+            seed_offset = int(getattr(self._cfgs.algo_cfgs, 'mc_value_study_seed_offset', 100_000))
+            self._mc_probe_seeds = list(range(seed_offset, seed_offset + n_probes))
+        env_cfgs = {}
+        if hasattr(self._cfgs, 'env_cfgs') and self._cfgs.env_cfgs is not None:
+            env_cfgs = self._cfgs.env_cfgs.todict()
+        cap = int(getattr(self._cfgs.algo_cfgs, 'isolated_eval_episode_cap', 1500))
+        # These episodes end on events, not a clock, so the configured rollout cap is the only
+        # horizon there is and the proportional positions resolve against it.
+        positions, _ = resolve_study_positions(
+            list(
+                getattr(
+                    self._cfgs.algo_cfgs,
+                    'intermediate_state_study_positions',
+                    [0.1, 0.3, 0.5, 0.7, 0.9],
+                ),
+            ),
+            cap,
+        )
+        normalizer = find_obs_normalizer(self._env._env)
+        interm_probes = int(getattr(self._cfgs.algo_cfgs, 'intermediate_state_study_probes', 20))
+        result = run_isolated_value_studies(
+            env_id=self._env_id,
+            env_cfgs=env_cfgs,
+            cfgs=self._cfgs,
+            model_cfgs=self._cfgs.model_cfgs,
+            obs_space=self._env.observation_space,
+            act_space=self._env.action_space,
+            epochs=self._cfgs.train_cfgs.epochs,
+            actor_state=self._actor_critic.state_dict(),
+            norm_state=normalizer.state_dict() if normalizer is not None else None,
+            obs_normalize=self._cfgs.algo_cfgs.obs_normalize,
+            probe_seeds=self._mc_probe_seeds,
+            mc_repeats=int(getattr(self._cfgs.algo_cfgs, 'mc_value_study_repeats', 5)),
+            positions=positions,
+            interm_probes=interm_probes,
+            interm_base_seed=700_000 + epoch * interm_probes,
+            discount_r=self._cfgs.algo_cfgs.gamma,
+            discount_c=getattr(self._cfgs.algo_cfgs, 'cost_gamma', self._cfgs.algo_cfgs.gamma),
+            episode_cap=cap,
+        )
+        eval_data_bundle['mc_study'] = {
+            'stats': result['mc_study'][0], 'raw': result['mc_study'][1],
+        }
+        eval_data_bundle['intermediate_study'] = {
+            pos: {'stats': stats, 'raw': raw} for pos, (stats, raw) in result['intermediate'].items()
+        }
+        if result['skipped_positions']:
+            # Episodes here end on events, not a clock, so a position deeper than every sampled
+            # episode simply has no visited state to score this epoch.
+            self._logger.log(
+                f'INFO: intermediate-state study had no probe reach positions '
+                f'{result["skipped_positions"]} this epoch (episode lengths '
+                f'{min(result["episode_lengths"])}-{max(result["episode_lengths"])}).',
+            )
+
     def _run_eval_studies(self, epoch: int) -> None:
         """Run this epoch's value studies, if due, and persist the results.
 
@@ -452,7 +535,7 @@ class PolicyGradient(BaseAlgo):
         eval_data_bundle: dict | None = {'epoch': epoch} if is_eval_epoch else None
         run_studies = getattr(self._cfgs.algo_cfgs, 'eval_critic', False) and is_eval_epoch
         progress = task_id = None
-        if run_studies:
+        if run_studies and not self._use_isolated_eval:
             # Both studies share one bar: six _roll_probes calls (s0 plus one per intermediate
             # position) would otherwise each draw their own. Counted in rollouts, which is what
             # the wait is actually made of.
@@ -471,7 +554,10 @@ class PolicyGradient(BaseAlgo):
             if progress is not None:
                 progress.advance(task_id, n)
 
-        if run_studies:
+        if run_studies and self._use_isolated_eval:
+            # One subprocess runs both studies; see _run_isolated_eval_studies.
+            self._run_isolated_eval_studies(epoch, eval_data_bundle)
+        elif run_studies:
             if self._mc_probe_seeds is None:
                 n_probes = int(getattr(self._cfgs.algo_cfgs, 'mc_value_study_probes', 100))
                 seed_offset = int(getattr(self._cfgs.algo_cfgs, 'mc_value_study_seed_offset', 100_000))
@@ -494,7 +580,7 @@ class PolicyGradient(BaseAlgo):
                 tick=_tick,
             )
             eval_data_bundle['mc_study'] = {'stats': mc_stats, 'raw': mc_raw}
-        if run_studies:
+        if run_studies and not self._use_isolated_eval:
             positions = list(
                 getattr(
                     self._cfgs.algo_cfgs,
@@ -552,6 +638,9 @@ class PolicyGradient(BaseAlgo):
                 eval_data_bundle['intermediate_study'][pos] = {
                     'stats': pos_stats, 'raw': pos_raw,
                 }
+        # Pooling reads only what the studies above filed in eval_data_bundle, so it runs for
+        # whichever path produced it.
+        if run_studies:
             pooled_sources = []
             if 'mc_study' in eval_data_bundle:
                 pooled_sources.append(eval_data_bundle['mc_study']['raw'])

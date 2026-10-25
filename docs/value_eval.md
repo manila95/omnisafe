@@ -97,3 +97,48 @@ The first evaluation is always epoch 1, never epoch 0: at epoch 0 the rollout
 comes from the freshly initialised policy and critics, so there is no trained
 update to look at.
 
+
+## Environments that cannot host a second env (MetaDrive)
+
+Both studies above build their own environment instances alongside the training
+env. MetaDrive cannot: its engine is a process-global singleton, so a second
+`SafeMetaDriveEnv` in the same process either refuses to construct
+(`Can not call this API after engine initialization!`) or shares the one engine
+and corrupts the first (`Agents: 0 != Num_agents: 1`). It also exposes no engine
+state save/restore, so the snapshot/restore the intermediate study relies on has
+nothing to call.
+
+Such an environment sets `eval_needs_isolated_process = True` on its env class,
+and the studies then run through `omnisafe/utils/isolated_eval.py`, in a spawned
+subprocess with its own engine. The training env is never touched. Results are
+filed in exactly the same shape the in-process studies produce, so the pooling,
+logging and `eval_data/` dumps are unchanged. Every other environment keeps the
+in-process path, bit-for-bit.
+
+Two differences on that path:
+
+- **The intermediate study uses no snapshots.** It rolls one on-policy episode
+  per probe, reads `V(s_t)` at each position and takes the realized discounted
+  return-to-go from that same `t`. Prediction and target refer to the same
+  visited state, so no restore is needed -- at the cost of one sample per probe
+  (`MCRepeats` is 1, `MeanVar` is 0).
+- **Episodes are ragged and unbounded.** They end on events, not a clock, so
+  positions are proportions of `isolated_eval_episode_cap` rather than of a time
+  limit, and a position no episode reached that epoch is reported and skipped
+  (`NumProbes` therefore falls with depth).
+
+```bash
+IMAGE=mice:metadrive docker/run.sh python experiments/train_mice.py \
+    --algo CPO --env-id SafeMetaDrive --total-steps 6000 --device cpu \
+    --vector-env-nums 1 --algo-cfgs:eval_critic True \
+    --algo-cfgs:isolated_eval_episode_cap 1000
+```
+
+```yaml
+isolated_eval_episode_cap: 1500   # rollout cap; unused unless the env needs the isolated path
+```
+
+Because the subprocess is spawned rather than forked (a fork would inherit the
+initialised engine), the training script must guard its top level with
+`if __name__ == '__main__':`. `examples/train_policy.py` already does; a
+hand-written script that does not gets an explicit error saying so.

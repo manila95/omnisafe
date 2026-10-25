@@ -54,6 +54,10 @@ class CMDP(ABC):
     _time_limit: int | None = None
     need_time_limit_wrapper: bool
     need_auto_reset_wrapper: bool
+    #: Whether this env cannot have a second instance alive in the same process, so the
+    #: value-eval studies must run in their own subprocess (see
+    #: omnisafe.utils.isolated_eval). False for everything but MetaDrive.
+    eval_needs_isolated_process: bool = False
     need_evaluation: bool = True
 
     _support_envs: ClassVar[list[str]]

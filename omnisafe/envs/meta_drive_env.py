@@ -62,6 +62,9 @@ class SafetyMetaDriveEnv(CMDP):
 
     need_auto_reset_wrapper: bool = True
     need_time_limit_wrapper: bool = False
+    # MetaDrive's engine is a process-global singleton: a second env in this process
+    # either refuses to construct or shares the engine and corrupts the first.
+    eval_needs_isolated_process: bool = True
     env_spec_log: dict[str, Any]
 
     _support_envs: ClassVar[list[str]] = [

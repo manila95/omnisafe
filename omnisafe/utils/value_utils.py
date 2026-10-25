@@ -66,7 +66,14 @@ def auroc_ceiling(returns: list[list[float]]) -> float:
     The label is an estimate, so a perfect critic cannot reach 1.0 at finite repeats; this is
     what is actually attainable. ``returns`` is ``n_probes x n_repeats``.
     """
-    arr = np.asarray(returns, dtype=float)
+    try:
+        arr = np.asarray(returns, dtype=float)
+    except ValueError:
+        # Ragged: the pooled set mixes probes carrying different repeat counts (a repeated s0
+        # study pooled with single-sample intermediate probes, as on the isolated-eval path).
+        # There is no common split-half to take, which is the same "not enough repeats to say"
+        # situation the shape check below already reports as nan.
+        return float('nan')
     if arr.ndim != 2 or arr.shape[1] < 2:
         return float('nan')
     half = arr.shape[1] // 2

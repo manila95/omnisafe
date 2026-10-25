@@ -59,6 +59,8 @@ defaults:
     # env is built with num_envs = intermediate_state_study_probes, so its wall-clock is set by
     # positions x repeats and is independent of the probe count.
     intermediate_state_study_positions: [0.1, 0.3, 0.5, 0.7, 0.9]
+    # Rollout cap for envs whose episodes have no time limit (MetaDrive); unused elsewhere.
+    isolated_eval_episode_cap: 1500
     intermediate_state_study_probes: 17
     intermediate_state_study_repeats: 10
     # --- rollout horizon -------------------------------------------------------------------
