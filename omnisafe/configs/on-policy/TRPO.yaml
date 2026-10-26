@@ -208,3 +208,8 @@ defaults:
       activation: tanh
       # learning rate
       lr: 0.001
+SafeMetaDrive:
+  # training configurations
+  train_cfgs:
+    # number of threads used for torch
+    torch_threads: 4

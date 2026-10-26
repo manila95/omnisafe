@@ -234,3 +234,8 @@ defaults:
     penalty_max: 100.0
     # Initial value of lagrangian multiplier
     lagrangian_multiplier_init: 0.001
+SafeMetaDrive:
+  # training configurations
+  train_cfgs:
+    # number of threads used for torch
+    torch_threads: 4

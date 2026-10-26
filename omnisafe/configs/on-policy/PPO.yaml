@@ -362,6 +362,8 @@ ShadowHandOverSafeJoint:
 SafeMetaDrive:
   # training configurations
   train_cfgs:
+    # number of threads used for torch
+    torch_threads: 4
     # total number of steps to train
     total_steps: 500000
   # logger configurations

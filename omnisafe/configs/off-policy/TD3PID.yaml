@@ -234,3 +234,8 @@ SafetyPointGoal1-v0:
     pid_ki: 0.00000001
     # The Kd of PID controller
     pid_kd: 0.00000001
+SafeMetaDrive:
+  # training configurations
+  train_cfgs:
+    # number of threads used for torch
+    torch_threads: 4

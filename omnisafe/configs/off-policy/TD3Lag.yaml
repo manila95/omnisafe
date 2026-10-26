@@ -228,3 +228,8 @@ SafetyPointGoal1-v0:
     lambda_lr: 0.0000005
     # Type of lagrangian optimizer
     lambda_optimizer: "Adam"
+SafeMetaDrive:
+  # training configurations
+  train_cfgs:
+    # number of threads used for torch
+    torch_threads: 4

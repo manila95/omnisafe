@@ -218,3 +218,8 @@ defaults:
     lambda_optimizer: "Adam"
     # The upper bound of lagrange multiplier
     lagrangian_upper_bound: 2.0
+SafeMetaDrive:
+  # training configurations
+  train_cfgs:
+    # number of threads used for torch
+    torch_threads: 4

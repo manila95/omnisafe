@@ -153,3 +153,8 @@ defaults:
       neg_coef: 1.0
   n_pretrain_s_iters: 1
   task: "train_policy"
+SafeMetaDrive:
+  # training configurations
+  train_cfgs:
+    # number of threads used for torch
+    torch_threads: 4

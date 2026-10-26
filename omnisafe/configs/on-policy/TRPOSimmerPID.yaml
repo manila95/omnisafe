@@ -291,3 +291,8 @@ SafetyPointGoal2-v0:
     saute_gamma: 0.9999
     # The reward when the agent is unsafe
     unsafe_reward: -0.2
+SafeMetaDrive:
+  # training configurations
+  train_cfgs:
+    # number of threads used for torch
+    torch_threads: 4
